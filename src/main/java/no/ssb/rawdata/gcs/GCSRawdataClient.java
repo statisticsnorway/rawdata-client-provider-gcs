@@ -3,6 +3,7 @@ package no.ssb.rawdata.gcs;
 import com.google.cloud.storage.BlobId;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
+import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataProducer;
 import no.ssb.service.provider.api.ProviderConfigurator;
@@ -41,6 +42,9 @@ class GCSRawdataClient implements RawdataClient {
 
     @Override
     public RawdataProducer producer(String topic) {
+        if (closed.get()) {
+            throw new RawdataClosedException();
+        }
         GCSRawdataProducer producer = new GCSRawdataProducer(bucket, gcsFolder, lmdbRawdataClient, localLmdbTopicFolder, topic);
         producers.add(producer);
         return producer;
@@ -48,6 +52,9 @@ class GCSRawdataClient implements RawdataClient {
 
     @Override
     public RawdataConsumer consumer(String topic, String initialPosition) {
+        if (closed.get()) {
+            throw new RawdataClosedException();
+        }
         GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, gcsFolder, lmdbRawdataClient, localLmdbTopicFolder, topic, initialPosition);
         consumers.add(consumer);
         return consumer;
