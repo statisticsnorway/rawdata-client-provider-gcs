@@ -2,6 +2,7 @@ package no.ssb.rawdata.gcs;
 
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
+import no.ssb.service.provider.api.ProviderConfigurator;
 import no.ssb.service.provider.api.ProviderName;
 
 import java.nio.file.Path;
@@ -19,14 +20,23 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
 
     @Override
     public Set<String> configurationKeys() {
-        return Set.of("lmdb.topic.folder", "gcs.bucket.url", "gcs.bucket.folder");
+        return Set.of(
+                "gcs.bucket.url",
+                "gcs.bucket.folder",
+                "lmdb.folder",
+                "lmdb.map-size",
+                "lmdb.message.file.max-size",
+                "lmdb.topic.write-concurrency",
+                "lmdb.topic.read-concurrency"
+        );
     }
 
     @Override
     public RawdataClient initialize(Map<String, String> configuration) {
-        Path localLmdbTopicFolder = Paths.get(configuration.get("lmdb.topic.folder"));
+        Path localLmdbTopicFolder = Paths.get(configuration.get("lmdb.folder"));
         String bucket = configuration.get("gcs.bucket.url");
         String gcsFolder = configuration.get("gcs.bucket.folder");
-        return new GCSRawdataClient(localLmdbTopicFolder, bucket, gcsFolder);
+        RawdataClient stagingClient = ProviderConfigurator.configure(configuration, "lmdb", RawdataClientInitializer.class);
+        return new GCSRawdataClient(stagingClient, localLmdbTopicFolder, bucket, gcsFolder);
     }
 }

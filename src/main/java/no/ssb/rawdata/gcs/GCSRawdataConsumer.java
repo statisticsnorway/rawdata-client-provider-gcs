@@ -1,5 +1,6 @@
 package no.ssb.rawdata.gcs;
 
+import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
@@ -13,18 +14,18 @@ class GCSRawdataConsumer implements RawdataConsumer {
 
     final String bucket;
     final String gcsFolder;
-    final RawdataClient lmdbClient;
+    final RawdataClient stagingClient;
     final Path localLmdbTopicFolder;
     final String topic;
-    final RawdataConsumer lmdbConsumer;
+    final RawdataConsumer stagingConsumer;
 
-    GCSRawdataConsumer(String bucket, String gcsFolder, RawdataClient lmdbClient, Path localLmdbTopicFolder, String topic, String initialPosition) {
+    GCSRawdataConsumer(String bucket, String gcsFolder, RawdataClient stagingClient, Path localLmdbTopicFolder, String topic, ULID.Value initialUlid, boolean inclusive) {
         this.bucket = bucket;
         this.gcsFolder = gcsFolder;
-        this.lmdbClient = lmdbClient;
+        this.stagingClient = stagingClient;
         this.localLmdbTopicFolder = localLmdbTopicFolder;
         this.topic = topic;
-        this.lmdbConsumer = lmdbClient.consumer(topic, initialPosition);
+        this.stagingConsumer = stagingClient.consumer(topic, initialUlid, inclusive);
     }
 
     @Override
@@ -34,21 +35,26 @@ class GCSRawdataConsumer implements RawdataConsumer {
 
     @Override
     public RawdataMessage receive(int timeout, TimeUnit unit) throws InterruptedException, RawdataClosedException {
-        return lmdbConsumer.receive(timeout, unit);
+        return stagingConsumer.receive(timeout, unit);
     }
 
     @Override
     public CompletableFuture<? extends RawdataMessage> receiveAsync() {
-        return lmdbConsumer.receiveAsync();
+        return stagingConsumer.receiveAsync();
+    }
+
+    @Override
+    public void seek(long timestamp) {
+        stagingConsumer.seek(timestamp);
     }
 
     @Override
     public boolean isClosed() {
-        return lmdbConsumer.isClosed();
+        return stagingConsumer.isClosed();
     }
 
     @Override
     public void close() throws Exception {
-        lmdbConsumer.close();
+        stagingConsumer.close();
     }
 }

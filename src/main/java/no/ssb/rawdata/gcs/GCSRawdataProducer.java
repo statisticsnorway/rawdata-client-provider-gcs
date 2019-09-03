@@ -2,8 +2,8 @@ package no.ssb.rawdata.gcs;
 
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
-import no.ssb.rawdata.api.RawdataContentNotBufferedException;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
 
 import java.nio.file.Path;
@@ -13,18 +13,18 @@ class GCSRawdataProducer implements RawdataProducer {
 
     final String bucket;
     final String gcsFolder;
-    final RawdataClient lmdbClient;
+    final RawdataClient stagingClient;
     final Path localLmdbTopicFolder;
     final String topic;
-    final RawdataProducer lmdbProducer;
+    final RawdataProducer stagingProducer;
 
-    GCSRawdataProducer(String bucket, String gcsFolder, RawdataClient lmdbClient, Path localLmdbTopicFolder, String topic) {
+    GCSRawdataProducer(String bucket, String gcsFolder, RawdataClient stagingClient, Path localLmdbTopicFolder, String topic) {
         this.bucket = bucket;
         this.gcsFolder = gcsFolder;
-        this.lmdbClient = lmdbClient;
+        this.stagingClient = stagingClient;
         this.localLmdbTopicFolder = localLmdbTopicFolder;
         this.topic = topic;
-        lmdbProducer = lmdbClient.producer(topic);
+        stagingProducer = stagingClient.producer(topic);
     }
 
     @Override
@@ -33,42 +33,33 @@ class GCSRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public String lastPosition() throws RawdataClosedException {
-        return lmdbProducer.lastPosition();
-    }
-
-    @Override
     public RawdataMessage.Builder builder() throws RawdataClosedException {
-        return lmdbProducer.builder();
+        return stagingProducer.builder();
     }
 
     @Override
-    public RawdataMessage buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
-        return lmdbProducer.buffer(builder);
+    public RawdataProducer buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
+        stagingProducer.buffer(builder);
+        return this;
     }
 
     @Override
-    public RawdataMessage buffer(RawdataMessage message) throws RawdataClosedException {
-        return lmdbProducer.buffer(message);
-    }
-
-    @Override
-    public void publish(String... positions) throws RawdataClosedException, RawdataContentNotBufferedException {
-        lmdbProducer.publish(positions);
+    public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
+        stagingProducer.publish(positions);
     }
 
     @Override
     public CompletableFuture<Void> publishAsync(String... positions) {
-        return lmdbProducer.publishAsync(positions);
+        return stagingProducer.publishAsync(positions);
     }
 
     @Override
     public boolean isClosed() {
-        return lmdbProducer.isClosed();
+        return stagingProducer.isClosed();
     }
 
     @Override
     public void close() throws Exception {
-        lmdbProducer.close();
+        stagingProducer.close();
     }
 }

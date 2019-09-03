@@ -6,6 +6,7 @@ module no.ssb.rawdata.gcs {
     requires no.ssb.service.provider.api;
     requires org.slf4j;
     requires google.cloud.storage;
+    requires de.huxhorn.sulky.ulid;
 
     provides RawdataClientInitializer with GCSRawdataClientInitializer;
 }
