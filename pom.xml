@@ -53,7 +53,7 @@
         <dependency>
             <groupId>no.ssb.rawdata</groupId>
             <artifactId>rawdata-client-api</artifactId>
-            <version>0.18-SNAPSHOT</version>
+            <version>0.19</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.spi</groupId>
@@ -63,7 +63,7 @@
         <dependency>
             <groupId>no.ssb.rawdata</groupId>
             <artifactId>rawdata-client-provider-lmdb</artifactId>
-            <version>0.1-SNAPSHOT</version>
+            <version>0.2</version>
             <scope>runtime</scope>
         </dependency>
         <dependency>

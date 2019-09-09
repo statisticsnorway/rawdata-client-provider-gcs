@@ -5,13 +5,18 @@ import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
+import no.ssb.rawdata.api.RawdataCursor;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataNoSuchPositionException;
 import no.ssb.rawdata.api.RawdataProducer;
 
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static java.util.Optional.ofNullable;
 
 class GCSRawdataClient implements RawdataClient {
 
@@ -46,18 +51,29 @@ class GCSRawdataClient implements RawdataClient {
     }
 
     @Override
-    public RawdataConsumer consumer(String topic, ULID.Value initialUlid, boolean inclusive) {
+    public RawdataConsumer consumer(String topic, RawdataCursor cursor) {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, gcsFolder, stagingRawdataClient, localLmdbTopicFolder, topic, initialUlid, inclusive);
+        ULID.Value value = ofNullable((GCSCursor) cursor).map(c -> c.ulid).orElse(null);
+        boolean inclusive = ofNullable((GCSCursor) cursor).map(c -> c.inclusive).orElse(true);
+        GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, gcsFolder, stagingRawdataClient, localLmdbTopicFolder, topic, value, inclusive);
         consumers.add(consumer);
         return consumer;
     }
 
     @Override
-    public ULID.Value ulidOfPosition(String topic, String position) {
-        return stagingRawdataClient.ulidOfPosition(topic, position);
+    public RawdataCursor cursorOf(String topic, ULID.Value ulid, boolean inclusive) {
+        return new GCSCursor(ulid, inclusive);
+    }
+
+    @Override
+    public RawdataCursor cursorOf(String topic, String position, boolean inclusive, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
+        return cursorOf(topic, ulidOfPosition(position, approxTimestamp, tolerance), inclusive);
+    }
+
+    private ULID.Value ulidOfPosition(String position, long approxTimestamp, Duration tolerance) {
+        throw new UnsupportedOperationException();
     }
 
     @Override

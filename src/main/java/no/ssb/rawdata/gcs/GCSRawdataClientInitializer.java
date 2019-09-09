@@ -23,6 +23,12 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         return Set.of(
                 "gcs.bucket.url",
                 "gcs.bucket.folder",
+                "staging.retention.max.days",
+                "staging.retention.max.hours",
+                "staging.retention.max.minutes",
+                "staging.retention.buffer.days",
+                "staging.retention.buffer.hours",
+                "staging.retention.buffer.minutes",
                 "lmdb.folder",
                 "lmdb.map-size",
                 "lmdb.message.file.max-size",
