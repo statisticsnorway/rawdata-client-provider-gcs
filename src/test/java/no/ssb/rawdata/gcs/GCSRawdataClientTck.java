@@ -61,12 +61,8 @@ public class GCSRawdataClientTck {
         Map<String, String> configuration = new LinkedHashMap<>();
         configuration.put("bucket", "kim_gaarder_rawdata_experiment");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
-        configuration.put("staging.retention.max.days", "1");
-        configuration.put("staging.retention.max.hours", "0");
-        configuration.put("staging.retention.max.minutes", "0");
-        configuration.put("staging.retention.buffer.days", "0");
-        configuration.put("staging.retention.buffer.hours", "0");
-        configuration.put("staging.retention.buffer.minutes", "30");
+        configuration.put("staging.max.seconds", "30");
+        configuration.put("staging.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB
 
         Path localTempFolder = Paths.get(configuration.get("local-temp-folder"));
         if (Files.exists(localTempFolder)) {

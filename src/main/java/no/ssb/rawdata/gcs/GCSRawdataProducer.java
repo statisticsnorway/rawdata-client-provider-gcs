@@ -47,6 +47,8 @@ class GCSRawdataProducer implements RawdataProducer {
 
     final String bucket;
     final Path tmpFolder;
+    final long stagingMaxSeconds;
+    final long stagingMaxBytes;
     final String topic;
 
     final Map<String, GCSRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
@@ -54,9 +56,11 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
     final AtomicReference<Path> pathRef = new AtomicReference<>();
 
-    GCSRawdataProducer(String bucket, Path tmpFolder, String topic) {
+    GCSRawdataProducer(String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
         this.bucket = bucket;
         this.tmpFolder = tmpFolder;
+        this.stagingMaxSeconds = stagingMaxSeconds;
+        this.stagingMaxBytes = stagingMaxBytes;
         this.topic = topic;
         try {
             Path topicFolder = tmpFolder.resolve(topic);
@@ -99,6 +103,12 @@ class GCSRawdataProducer implements RawdataProducer {
     @Override
     public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
         for (String position : positions) {
+
+            boolean timeLimitExceeded = false; // TODO determine whether limit of stagingMaxSeconds is broken
+            if (timeLimitExceeded) {
+                // TODO close avro file, send file to GCS, re-open a new staging file overwriting the old one.
+            }
+
             GCSRawdataMessage.Builder builder = buffer.remove(position);
             if (builder == null) {
                 throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
@@ -121,6 +131,11 @@ class GCSRawdataProducer implements RawdataProducer {
                 dataFileWriterRef.get().append(record);
             } catch (IOException e) {
                 throw new RuntimeException(e);
+            }
+
+            boolean sizeLimitExceeded = false; // TODO determine whether limit of stagingMaxBytes is broken
+            if (sizeLimitExceeded) {
+                // TODO close avro file, send file to GCS, re-open a new staging file overwriting the old one.
             }
         }
     }

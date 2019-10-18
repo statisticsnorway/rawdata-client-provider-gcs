@@ -21,12 +21,8 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         return Set.of(
                 "bucket",
                 "local-temp-folder",
-                "staging.retention.max.days",
-                "staging.retention.max.hours",
-                "staging.retention.max.minutes",
-                "staging.retention.buffer.days",
-                "staging.retention.buffer.hours",
-                "staging.retention.buffer.minutes"
+                "staging.max.seconds",
+                "staging.max.bytes"
         );
     }
 
@@ -34,6 +30,8 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
     public RawdataClient initialize(Map<String, String> configuration) {
         String bucket = configuration.get("bucket");
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
-        return new GCSRawdataClient(bucket, localTempFolder);
+        long stagingMaxSeconds = Long.parseLong(configuration.get("staging.max.seconds"));
+        long stagingMaxBytes = Long.parseLong(configuration.get("staging.max.bytes"));
+        return new GCSRawdataClient(bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes);
     }
 }

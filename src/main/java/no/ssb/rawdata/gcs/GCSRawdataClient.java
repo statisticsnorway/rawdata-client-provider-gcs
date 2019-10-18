@@ -33,13 +33,17 @@ class GCSRawdataClient implements RawdataClient {
 
     final String bucket;
     final Path tmpFileFolder;
+    final long stagingMaxSeconds;
+    final long stagingMaxBytes;
 
     final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    GCSRawdataClient(String bucket, Path tmpFileFolder) {
+    GCSRawdataClient(String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes) {
         this.bucket = bucket;
         this.tmpFileFolder = tmpFileFolder;
+        this.stagingMaxSeconds = stagingMaxSeconds;
+        this.stagingMaxBytes = stagingMaxBytes;
     }
 
     @Override
@@ -47,7 +51,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataProducer producer = new GCSRawdataProducer(bucket, tmpFileFolder, topic);
+        GCSRawdataProducer producer = new GCSRawdataProducer(bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
         producers.add(producer);
         return producer;
     }
