@@ -58,6 +58,22 @@ class GCSRawdataProducer implements RawdataProducer {
         this.bucket = bucket;
         this.tmpFolder = tmpFolder;
         this.topic = topic;
+        try {
+            Path topicFolder = tmpFolder.resolve(topic);
+            Files.createDirectories(topicFolder);
+            Path path = Files.createTempFile(topicFolder, "", ".avro");
+            pathRef.set(path);
+            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
+            dataFileWriterRef.set(dataFileWriter);
+            try {
+                dataFileWriter.create(schema, path.toFile());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
@@ -82,23 +98,6 @@ class GCSRawdataProducer implements RawdataProducer {
 
     @Override
     public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
-        File file = new File(tmpFolder.toFile(), topic + "/rawdata.avro");
-        try {
-            Files.createDirectories(file.toPath().getParent());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        if (pathRef.compareAndSet(null, file.toPath())) {
-            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
-            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriterRef.set(dataFileWriter);
-            try {
-                dataFileWriter.create(schema, file);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        }
-
         for (String position : positions) {
             GCSRawdataMessage.Builder builder = buffer.remove(position);
             if (builder == null) {
@@ -149,7 +148,11 @@ class GCSRawdataProducer implements RawdataProducer {
             Path path = pathRef.getAndSet(null);
             if (path != null) {
                 String fileName = computeFilenameOfLocalAvroFile(path.toFile());
-                GCSRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
+                if (fileName != null) {
+                    GCSRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
+                } else {
+                    // no records, no need to write file to GCS
+                }
             }
             buffer.clear();
         }
