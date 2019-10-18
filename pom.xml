@@ -61,15 +61,21 @@
             <version>0.3</version>
         </dependency>
         <dependency>
-            <groupId>no.ssb.rawdata</groupId>
-            <artifactId>rawdata-client-provider-lmdb</artifactId>
-            <version>0.2</version>
-            <scope>runtime</scope>
+            <groupId>org.apache.avro</groupId>
+            <artifactId>avro</artifactId>
+            <version>1.9.1</version>
         </dependency>
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
-            <version>1.87.0</version>
+            <version>1.96.0</version>
+            <exclusions>
+                <exclusion>
+                    <!-- findbugs jsr305 conflicts with javax.annotation in a JPMS split-package issue -->
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
         <dependency>
             <groupId>org.slf4j</groupId>
