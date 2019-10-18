@@ -169,6 +169,7 @@ class GCSRawdataConsumer implements RawdataConsumer {
             }
             activeBlobFromKeyRef.set(null);
             topicBlobsByFromTimestampRef.set(null);
+            preloadedMessages.clear();
         }
     }
 }
