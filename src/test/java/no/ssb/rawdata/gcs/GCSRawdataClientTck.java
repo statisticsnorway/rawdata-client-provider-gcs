@@ -39,6 +39,13 @@ import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 
+/**
+ * Running these tests requires an accessible google-cloud-storage bucket with read and write object access.
+ * <p>
+ * Remember to set environment variable to where service-account key file is:
+ * <p>
+ * GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-file.json
+ */
 public class GCSRawdataClientTck {
 
     static final Storage storage;
