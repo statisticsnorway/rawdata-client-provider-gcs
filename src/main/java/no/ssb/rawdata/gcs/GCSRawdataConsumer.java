@@ -79,7 +79,26 @@ class GCSRawdataConsumer implements RawdataConsumer {
             return null;
         }
         if (!dataFileReader.hasNext()) {
-            return null; // TODO end-of-file, get next file. If end-of-last-file, continue from Pub-Sub skipping up to and including the last message returned earlier
+            Long currentBlobKey = activeBlobFromKeyRef.get();
+            NavigableMap<Long, Blob> blobByFrom = topicBlobsByFromTimestampRef.get(); // TODO consider re-loading list from gcs
+            Map.Entry<Long, Blob> nextEntry = blobByFrom.higherEntry(currentBlobKey);
+            if (nextEntry == null) {
+                activeBlobDataFileReaderRef.set(null);
+                activeBlobFromKeyRef.set(null);
+                return null;
+                // TODO Continue from Cloud Pub-Sub skipping up to and including the last message returned earlier
+            }
+            activeBlobFromKeyRef.set(nextEntry.getKey());
+            Blob blob = nextEntry.getValue();
+            DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+            DataFileReader<GenericRecord> newDataFileReader;
+            try {
+                newDataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            activeBlobDataFileReaderRef.set(newDataFileReader);
+            return receive(timeout, unit);
         }
         GenericRecord record = dataFileReader.next();
         GCSRawdataMessage msg = toRawdataMessage(record);

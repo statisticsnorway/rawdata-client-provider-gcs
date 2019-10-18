@@ -416,4 +416,53 @@ public class GCSRawdataClientTck {
         }
         client.cursorOf("the-topic", "d", true, System.currentTimeMillis(), Duration.ofMinutes(1));
     }
+
+    @Test
+    public void thatMultipleGCSFilesCanBeProducedAndReadBack() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("a");
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("b");
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("c");
+        }
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("d").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("d");
+            producer.buffer(producer.builder().position("e").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("e");
+            producer.buffer(producer.builder().position("f").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("f");
+        }
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("g").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("g");
+            producer.buffer(producer.builder().position("h").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("h");
+            producer.buffer(producer.builder().position("i").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("i");
+        }
+
+        try (RawdataConsumer consumer = client.consumer("the-topic")) {
+            RawdataMessage a = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage b = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage c = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage d = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage e = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage f = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage g = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage h = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage i = consumer.receive(1, TimeUnit.SECONDS);
+            assertEquals(a.position(), "a");
+            assertEquals(b.position(), "b");
+            assertEquals(c.position(), "c");
+            assertEquals(d.position(), "d");
+            assertEquals(e.position(), "e");
+            assertEquals(f.position(), "f");
+            assertEquals(g.position(), "g");
+            assertEquals(h.position(), "h");
+            assertEquals(i.position(), "i");
+        }
+    }
 }
