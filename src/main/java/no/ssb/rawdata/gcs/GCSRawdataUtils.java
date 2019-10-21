@@ -63,7 +63,7 @@ class GCSRawdataUtils {
         return filename;
     }
 
-    static final Pattern filenamePattern = Pattern.compile("(?<from>[^_]+)_(?<to>[^_]+)_\\.(?<suffix>[^.]*)");
+    static final Pattern filenamePattern = Pattern.compile("(?<from>[^_]+)_(?<count>[0123456789]+)_(?<position>.+)\\.avro");
 
     /**
      * @return lower-bound (inclusive) timestamp of this file range
@@ -79,16 +79,29 @@ class GCSRawdataUtils {
     }
 
     /**
-     * @return upper-bound (exclusive) timestamp of this file range
+     * @return lower-bound (inclusive) position of this file range
      */
-    static long getToTimestamp(BlobId blobId) {
+    static String getFirstPosition(BlobId blobId) {
         String filename = filename(blobId);
         Matcher filenameMatcher = filenamePattern.matcher(filename);
         if (!filenameMatcher.matches()) {
             throw new RuntimeException("GCS filename does not match filenamePattern. filename=" + filename);
         }
-        String to = filenameMatcher.group("to");
-        return parseTimestamp(to);
+        String position = filenameMatcher.group("position");
+        return position;
+    }
+
+    /**
+     * @return count of messages in the file
+     */
+    static long getMessageCount(BlobId blobId) {
+        String filename = filename(blobId);
+        Matcher filenameMatcher = filenamePattern.matcher(filename);
+        if (!filenameMatcher.matches()) {
+            throw new RuntimeException("GCS filename does not match filenamePattern. filename=" + filename);
+        }
+        long count = Long.parseLong(filenameMatcher.group("count"));
+        return count;
     }
 
     Stream<Blob> listTopicFiles(String bucketName, String topic) {

@@ -1,6 +1,5 @@
 package no.ssb.rawdata.gcs;
 
-import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
@@ -9,16 +8,12 @@ import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
-import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.DataFileWriter;
 import org.apache.avro.generic.GenericData;
-import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
-import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.DatumWriter;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.file.Files;
@@ -60,7 +55,7 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicReference<Path> pathRef = new AtomicReference<>();
 
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
-
+    final GCSAvroFileMetadata activeAvrofileMetadata = new GCSAvroFileMetadata();
 
     GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
         this.gcsRawdataUtils = new GCSRawdataUtils(storage);
@@ -81,6 +76,7 @@ class GCSRawdataProducer implements RawdataProducer {
     }
 
     private void createOrOverwriteLocalAvroFile(Path path) {
+        activeAvrofileMetadata.clear();
         DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
         DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
         dataFileWriter.setSyncInterval(2 * 1024 * 1024); // 2 MiB
@@ -102,9 +98,8 @@ class GCSRawdataProducer implements RawdataProducer {
             }
             Path path = pathRef.get();
             if (path != null) {
-                String fileName = computeFilenameOfLocalAvroFile(path.toFile());
-                if (fileName != null) {
-                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
+                if (activeAvrofileMetadata.getCount() > 0) {
+                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), activeAvrofileMetadata.toBlobId(bucket, topic));
                 } else {
                     // no records, no need to write file to GCS
                 }
@@ -158,6 +153,9 @@ class GCSRawdataProducer implements RawdataProducer {
             GCSRawdataMessage message = builder.build();
             prevUlid.set(message.ulid());
 
+            activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
+            activeAvrofileMetadata.setPositionOfFirstRecord(position);
+
             try {
                 GenericRecord record = new GenericData.Record(schema);
                 record.put("id", new GenericData.Fixed(schema.getField("id").schema(), message.ulid().toBytes()));
@@ -167,6 +165,7 @@ class GCSRawdataProducer implements RawdataProducer {
                 record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> ByteBuffer.wrap(e.getValue()))));
 
                 dataFileWriterRef.get().append(record);
+                activeAvrofileMetadata.incrementCounter(1);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -199,38 +198,4 @@ class GCSRawdataProducer implements RawdataProducer {
             buffer.clear();
         }
     }
-
-    private String computeFilenameOfLocalAvroFile(File file) throws IOException {
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(schema);
-        try (DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(file, datumReader)) {
-            if (!dataFileReader.hasNext()) {
-                return null;
-            }
-            GenericRecord firstRecord = dataFileReader.next();
-            GenericRecord lastRecord = getLastAvroRecordInFile(dataFileReader);
-            if (lastRecord == null) {
-                lastRecord = firstRecord;
-            }
-
-            GenericData.Fixed firstId = (GenericData.Fixed) firstRecord.get("id");
-            ULID.Value firstUlid = ULID.fromBytes(firstId.bytes());
-
-            GenericData.Fixed lastId = (GenericData.Fixed) lastRecord.get("id");
-            ULID.Value lastUlid = ULID.fromBytes(lastId.bytes());
-
-            String fromTime = GCSRawdataUtils.formatTimestamp(firstUlid.timestamp());
-            String toTime = GCSRawdataUtils.formatTimestamp(lastUlid.timestamp() + 1);
-
-            return fromTime + "_" + toTime + "_.avro";
-        }
-    }
-
-    private GenericRecord getLastAvroRecordInFile(DataFileReader<GenericRecord> dataFileReader) throws IOException {
-        GenericRecord record = null;
-        while (dataFileReader.hasNext()) {
-            dataFileReader.next(record);
-        }
-        return record;
-    }
-
 }
