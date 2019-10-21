@@ -1,7 +1,10 @@
 package no.ssb.rawdata.gcs;
 
+import com.google.auth.oauth2.GoogleCredentials;
+import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
@@ -16,14 +19,19 @@ import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumReader;
 
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.NavigableMap;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -32,18 +40,19 @@ class GCSRawdataClient implements RawdataClient {
 
     final AtomicBoolean closed = new AtomicBoolean(false);
 
-    final Storage storage;
+    final Path serviceAccountKeyPath;
     final String bucket;
     final Path tmpFileFolder;
     final long stagingMaxSeconds;
     final long stagingMaxBytes;
     final int gcsFileListingMaxIntervalSeconds;
+    final ConcurrentMap<String, Storage> storageByAccessType = new ConcurrentHashMap<>();
 
     final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    GCSRawdataClient(Storage storage, String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
-        this.storage = storage;
+    GCSRawdataClient(Path serviceAccountKeyPath, String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
+        this.serviceAccountKeyPath = serviceAccountKeyPath;
         this.bucket = bucket;
         this.tmpFileFolder = tmpFileFolder;
         this.stagingMaxSeconds = stagingMaxSeconds;
@@ -51,12 +60,40 @@ class GCSRawdataClient implements RawdataClient {
         this.gcsFileListingMaxIntervalSeconds = gcsFileListingMaxIntervalSeconds;
     }
 
+    Storage getWritableStorage() {
+        return storageByAccessType.computeIfAbsent("read-write", k -> {
+            ServiceAccountCredentials sourceCredentials;
+            try {
+                sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
+            Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
+            return storage;
+        });
+    }
+
+    Storage getReadOnlyStorage() {
+        return storageByAccessType.computeIfAbsent("read-only", k -> {
+            ServiceAccountCredentials sourceCredentials;
+            try {
+                sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_only"));
+            Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
+            return storage;
+        });
+    }
+
     @Override
     public RawdataProducer producer(String topic) {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataProducer producer = new GCSRawdataProducer(storage, bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
+        GCSRawdataProducer producer = new GCSRawdataProducer(getWritableStorage(), bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
         producers.add(producer);
         return producer;
     }
@@ -66,7 +103,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataConsumer consumer = new GCSRawdataConsumer(storage, bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
+        GCSRawdataConsumer consumer = new GCSRawdataConsumer(getReadOnlyStorage(), bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
         consumers.add(consumer);
         return consumer;
     }
@@ -84,7 +121,7 @@ class GCSRawdataClient implements RawdataClient {
     private ULID.Value ulidOfPosition(String topic, String position, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
         ULID.Value lowerBoundUlid = RawdataConsumer.beginningOf(approxTimestamp - tolerance.toMillis());
         ULID.Value upperBoundUlid = RawdataConsumer.beginningOf(approxTimestamp + tolerance.toMillis());
-        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(storage, bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
+        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(getReadOnlyStorage(), bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
             RawdataMessage message;
             while ((message = consumer.receive(2, TimeUnit.SECONDS)) != null) {
                 if (message.timestamp() > upperBoundUlid.timestamp()) {
@@ -118,7 +155,7 @@ class GCSRawdataClient implements RawdataClient {
 
     @Override
     public RawdataMessage lastMessage(String topic) throws RawdataClosedException {
-        NavigableMap<Long, Blob> topicBlobs = new GCSRawdataUtils(storage).getTopicBlobs(bucket, topic);
+        NavigableMap<Long, Blob> topicBlobs = new GCSRawdataUtils(getReadOnlyStorage()).getTopicBlobs(bucket, topic);
         if (topicBlobs.isEmpty()) {
             return null;
         }

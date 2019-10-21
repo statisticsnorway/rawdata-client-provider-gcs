@@ -4,7 +4,9 @@ import com.google.api.gax.paging.Page;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
+import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
+import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -39,22 +41,33 @@ import static org.testng.Assert.assertNull;
 /**
  * Running these tests requires an accessible google-cloud-storage bucket with read and write object access.
  * <p>
- * Remember to set environment variable to where service-account key file is:
- * <p>
- * GOOGLE_APPLICATION_CREDENTIALS=/path/to/service-account-file.json
+ * Requirements: A google cloud service-account key with access to read and write objects in cloud-storage.
+ * This can be put as a file at the path "secret/gcs_sa_test.json"
  */
 public class GCSRawdataClientTck {
 
     GCSRawdataClient client;
 
+    RawdataClient createClient() {
+        return ProviderConfigurator.configure(Map.of(
+                "local-temp-folder", "temp",
+                "avro-file.max.seconds", "3600",
+                "avro-file.max.bytes", "10485760",
+                "gcs.bucket-name", "test-bucket",
+                "gcs.listing.min-interval-seconds", "60",
+                "gcs.service-account.key-file", "secret/my_gcs_sa.json"
+        ), "gcs", RawdataClientInitializer.class);
+    }
+
     @BeforeMethod
     public void createRawdataClient() throws IOException {
         Map<String, String> configuration = new LinkedHashMap<>();
-        configuration.put("bucket", "kim_gaarder_rawdata_experiment");
+        configuration.put("gcs.bucket-name", "kim_gaarder_rawdata_experiment");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
-        configuration.put("staging.max.seconds", "30");
-        configuration.put("staging.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB
-        configuration.put("gcs.listing.max-interval-seconds", "3");
+        configuration.put("avro-file.max.seconds", "30");
+        configuration.put("avro-file.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB
+        configuration.put("gcs.listing.min-interval-seconds", "3");
+        configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
 
         Path localTempFolder = Paths.get(configuration.get("local-temp-folder"));
         if (Files.exists(localTempFolder)) {
@@ -64,11 +77,12 @@ public class GCSRawdataClientTck {
         client = (GCSRawdataClient) ProviderConfigurator.configure(configuration, "gcs", RawdataClientInitializer.class);
 
         // clear bucket
-        String bucket = configuration.get("bucket");
-        Page<Blob> page = client.storage.list(bucket);
+        String bucket = configuration.get("gcs.bucket-name");
+        Storage storage = client.getWritableStorage();
+        Page<Blob> page = storage.list(bucket);
         BlobId[] blobs = StreamSupport.stream(page.iterateAll().spliterator(), false).map(BlobInfo::getBlobId).collect(Collectors.toList()).toArray(new BlobId[0]);
         if (blobs.length > 0) {
-            List<Boolean> deletedList = client.storage.delete(blobs);
+            List<Boolean> deletedList = storage.delete(blobs);
             for (Boolean deleted : deletedList) {
                 if (!deleted) {
                     throw new RuntimeException("Unable to delete blob in bucket");

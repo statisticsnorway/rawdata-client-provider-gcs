@@ -66,9 +66,21 @@
             <version>1.9.1</version>
         </dependency>
         <dependency>
+            <groupId>com.google.auth</groupId>
+            <artifactId>google-auth-library-oauth2-http</artifactId>
+            <version>0.18.0</version>
+            <exclusions>
+                <exclusion>
+                    <!-- findbugs jsr305 conflicts with javax.annotation in a JPMS split-package issue -->
+                    <groupId>com.google.code.findbugs</groupId>
+                    <artifactId>jsr305</artifactId>
+                </exclusion>
+            </exclusions>
+        </dependency>
+        <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
-            <version>1.96.0</version>
+            <version>1.98.0</version>
             <exclusions>
                 <exclusion>
                     <!-- findbugs jsr305 conflicts with javax.annotation in a JPMS split-package issue -->

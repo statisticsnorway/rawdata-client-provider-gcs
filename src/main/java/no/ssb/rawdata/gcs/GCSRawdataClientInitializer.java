@@ -1,7 +1,5 @@
 package no.ssb.rawdata.gcs;
 
-import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.service.provider.api.ProviderName;
@@ -21,24 +19,23 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
     @Override
     public Set<String> configurationKeys() {
         return Set.of(
-                "bucket",
                 "local-temp-folder",
-                "staging.max.seconds",
-                "staging.max.bytes",
-                "gcs.listing.max-interval-seconds"
+                "avro-file.max.seconds",
+                "avro-file.max.bytes",
+                "gcs.bucket-name",
+                "gcs.listing.min-interval-seconds",
+                "gcs.service-account.key-file"
         );
     }
 
     @Override
     public RawdataClient initialize(Map<String, String> configuration) {
-        String bucket = configuration.get("bucket");
+        String bucket = configuration.get("gcs.bucket-name");
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
-        long stagingMaxSeconds = Long.parseLong(configuration.get("staging.max.seconds"));
-        long stagingMaxBytes = Long.parseLong(configuration.get("staging.max.bytes"));
-        int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.max-interval-seconds"));
-
-        Storage storage = StorageOptions.getDefaultInstance().getService(); // TODO, replace with credentials from configuration
-
-        return new GCSRawdataClient(storage, bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes, gcsFileListingMaxIntervalSeconds);
+        long stagingMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
+        long stagingMaxBytes = Long.parseLong(configuration.get("avro-file.max.bytes"));
+        int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.min-interval-seconds"));
+        Path credPath = Path.of(configuration.get("gcs.service-account.key-file"));
+        return new GCSRawdataClient(credPath, bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes, gcsFileListingMaxIntervalSeconds);
     }
 }
