@@ -32,7 +32,7 @@ class GCSRawdataConsumer implements RawdataConsumer {
     final String bucket;
     final String topic;
     final GCSTopicAvroFileCache gcsTopicAvroFileCache;
-    final AtomicReference<Long> activeBlobFromKeyRef = new AtomicReference<>(null);
+    final AtomicReference<Long> activeBlobFromKeyRef = new AtomicReference<>(-1L);
     final AtomicReference<DataFileReader<GenericRecord>> activeBlobDataFileReaderRef = new AtomicReference<>(null);
     final AtomicBoolean closed = new AtomicBoolean(false);
     final Deque<GCSRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
@@ -80,36 +80,38 @@ class GCSRawdataConsumer implements RawdataConsumer {
         }
         DataFileReader<GenericRecord> dataFileReader = activeBlobDataFileReaderRef.get();
         if (dataFileReader == null) {
-            return null;
+            Map.Entry<Long, Blob> nextEntry = findNextGCSBlob(timeout, unit, start);
+            if (nextEntry == null) return null; // timeout
+            activeBlobFromKeyRef.set(nextEntry.getKey());
+            dataFileReader = setDataFileReader(nextEntry.getValue());
         }
         if (!dataFileReader.hasNext()) {
-            Long currentBlobKey = activeBlobFromKeyRef.get();
-            Map.Entry<Long, Blob> nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
-            while (nextEntry == null) {
-                // TODO the GCS file-listing poll-loop can be replaced with notifications from pub/sub
-                // TODO if so, the poll-loop should be a fallback when google-pub/sub is unavailable
-                long duration = System.currentTimeMillis() - start;
-                if (duration > unit.toMillis(timeout)) {
-                    return null; // timeout
-                }
-                Thread.sleep(1000);
-                nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
-            }
+            Map.Entry<Long, Blob> nextEntry = findNextGCSBlob(timeout, unit, start);
+            if (nextEntry == null) return null; // timeout
             activeBlobFromKeyRef.set(nextEntry.getKey());
             Blob blob = nextEntry.getValue();
-            DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
-            DataFileReader<GenericRecord> newDataFileReader;
-            try {
-                newDataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            activeBlobDataFileReaderRef.set(newDataFileReader);
+            setDataFileReader(blob);
             return receive(timeout, unit);
         }
         GenericRecord record = dataFileReader.next();
         GCSRawdataMessage msg = toRawdataMessage(record);
         return msg;
+    }
+
+    private Map.Entry<Long, Blob> findNextGCSBlob(int timeout, TimeUnit unit, long start) throws InterruptedException {
+        Long currentBlobKey = activeBlobFromKeyRef.get();
+        Map.Entry<Long, Blob> nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
+        while (nextEntry == null) {
+            // TODO the GCS file-listing poll-loop can be replaced with notifications from pub/sub
+            // TODO if so, the poll-loop should be a fallback when google-pub/sub is unavailable
+            long duration = System.currentTimeMillis() - start;
+            if (duration > unit.toMillis(timeout)) {
+                return null; // timeout
+            }
+            Thread.sleep(1000);
+            nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
+        }
+        return nextEntry;
     }
 
     static GCSRawdataMessage toRawdataMessage(GenericRecord record) {
@@ -152,20 +154,12 @@ class GCSRawdataConsumer implements RawdataConsumer {
             firstEntryHigherOrEqual = blobByFrom.ceilingEntry(timestamp);
         }
         if (firstEntryHigherOrEqual == null) {
-            activeBlobFromKeyRef.set(null);
-            activeBlobDataFileReaderRef.set(null);
+            activeBlobFromKeyRef.set(-1L);
             return;
         }
         activeBlobFromKeyRef.set(firstEntryHigherOrEqual.getKey());
         Blob blob = firstEntryHigherOrEqual.getValue();
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
-        DataFileReader<GenericRecord> dataFileReader;
-        try {
-            dataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-        activeBlobDataFileReaderRef.set(dataFileReader);
+        DataFileReader<GenericRecord> dataFileReader = setDataFileReader(blob);
         GenericRecord record = null;
         while (dataFileReader.hasNext()) {
             try {
@@ -180,6 +174,18 @@ class GCSRawdataConsumer implements RawdataConsumer {
                 throw new RuntimeException(e);
             }
         }
+    }
+
+    private DataFileReader<GenericRecord> setDataFileReader(Blob blob) {
+        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+        DataFileReader<GenericRecord> dataFileReader;
+        try {
+            dataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+        activeBlobDataFileReaderRef.set(dataFileReader);
+        return dataFileReader;
     }
 
     @Override

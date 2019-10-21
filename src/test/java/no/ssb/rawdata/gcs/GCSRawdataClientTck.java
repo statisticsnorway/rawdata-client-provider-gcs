@@ -6,7 +6,6 @@ import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
-import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -47,17 +46,6 @@ import static org.testng.Assert.assertNull;
 public class GCSRawdataClientTck {
 
     GCSRawdataClient client;
-
-    RawdataClient createClient() {
-        return ProviderConfigurator.configure(Map.of(
-                "local-temp-folder", "temp",
-                "avro-file.max.seconds", "3600",
-                "avro-file.max.bytes", "10485760",
-                "gcs.bucket-name", "test-bucket",
-                "gcs.listing.min-interval-seconds", "60",
-                "gcs.service-account.key-file", "secret/my_gcs_sa.json"
-        ), "gcs", RawdataClientInitializer.class);
-    }
 
     @BeforeMethod
     public void createRawdataClient() throws IOException {
@@ -534,5 +522,51 @@ public class GCSRawdataClientTck {
             assertEquals(h.position(), "h");
             assertEquals(i.position(), "i");
         }
+    }
+
+    @Test
+    public void thatNonExistentStreamCanBeConsumedFirstAndProducedAfter() throws Exception {
+        Thread consumerThread = new Thread(() -> {
+            try (RawdataConsumer consumer = client.consumer("the-topic")) {
+                RawdataMessage a = consumer.receive(15, TimeUnit.SECONDS);
+                RawdataMessage b = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage c = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage d = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage e = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage f = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage none = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(a.position(), "a");
+                assertEquals(b.position(), "b");
+                assertEquals(c.position(), "c");
+                assertEquals(d.position(), "d");
+                assertEquals(e.position(), "e");
+                assertEquals(f.position(), "f");
+                assertNull(none);
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+        consumerThread.start();
+
+        Thread.sleep(1500);
+
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("a");
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("b");
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("c");
+        }
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("d").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("d");
+            producer.buffer(producer.builder().position("e").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("e");
+            producer.buffer(producer.builder().position("f").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("f");
+        }
+
+        consumerThread.join();
     }
 }
