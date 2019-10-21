@@ -11,6 +11,7 @@ module no.ssb.rawdata.gcs {
     requires google.cloud.storage;
     requires google.cloud.core;
     requires com.google.auth.oauth2;
+    requires com.google.auth;
 
     provides RawdataClientInitializer with GCSRawdataClientInitializer;
 }
