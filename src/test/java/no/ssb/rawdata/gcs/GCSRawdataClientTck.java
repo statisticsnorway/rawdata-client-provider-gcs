@@ -50,7 +50,7 @@ public class GCSRawdataClientTck {
     @BeforeMethod
     public void createRawdataClient() throws IOException {
         Map<String, String> configuration = new LinkedHashMap<>();
-        configuration.put("gcs.bucket-name", "kim_gaarder_rawdata_experiment");
+        configuration.put("gcs.bucket-name", "bip-drone-dependency-cache");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
         configuration.put("avro-file.max.seconds", "30");
         configuration.put("avro-file.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB

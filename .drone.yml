@@ -1,0 +1,67 @@
+kind: pipeline
+name: default
+
+steps:
+
+  - name: authenticate
+    image: robertstettner/drone-mvn-auth
+    pull: always
+    settings:
+      servers:
+        from_secret: maven_servers
+
+  - name: build
+    image: maven:3.6.0-jdk-11-slim
+    commands:
+      - mvn compile -P ssb-bip --update-snapshots -DskipTests=true -Dmaven.javadoc.skip=true --batch-mode --global-settings settings.xml
+
+  - name: test
+    image: maven:3.6.0-jdk-11-slim
+    commands:
+      - mkdir secret
+      - echo "$GAC" > secret/gcs_sa_test.json
+      - mvn test -P ssb-bip,coverage --update-snapshots --batch-mode --global-settings settings.xml
+    environment:
+      GAC:
+        from_secret: gcs_credentials
+
+  - name: publish-maven
+    image: maven:3.6.0-jdk-11-slim
+    commands:
+      - mvn clean deploy -P ssb-bip, -DskipTests=true --batch-mode --global-settings settings.xml
+    when:
+      event:
+        exclude: pull_request
+      branch:
+        - master
+        - develop
+
+  - name: slack
+    image: plugins/slack
+    settings:
+      webhook:
+        from_secret: slack_webhook_url
+      channel: bip-ci-test
+    when:
+      status: [ success, failure ]
+
+---
+kind: secret
+name: slack_webhook_url
+get:
+  path: drone-slack-webhook-url
+  name: slack-webhook-url
+
+---
+kind: secret
+name: maven_servers
+get:
+  path: drone-maven-servers
+  name: ssb-bip-maven-servers
+
+---
+kind: secret
+name: gcs_credentials
+get:
+  path: drone-gcs-credentials
+  name: gcs-credentials
