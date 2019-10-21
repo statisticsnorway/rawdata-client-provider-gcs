@@ -35,15 +35,17 @@ class GCSRawdataClient implements RawdataClient {
     final Path tmpFileFolder;
     final long stagingMaxSeconds;
     final long stagingMaxBytes;
+    final int gcsFileListingMaxIntervalSeconds;
 
     final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    GCSRawdataClient(String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes) {
+    GCSRawdataClient(String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
         this.bucket = bucket;
         this.tmpFileFolder = tmpFileFolder;
         this.stagingMaxSeconds = stagingMaxSeconds;
         this.stagingMaxBytes = stagingMaxBytes;
+        this.gcsFileListingMaxIntervalSeconds = gcsFileListingMaxIntervalSeconds;
     }
 
     @Override
@@ -61,7 +63,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, (GCSCursor) cursor);
+        GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
         consumers.add(consumer);
         return consumer;
     }
@@ -79,7 +81,7 @@ class GCSRawdataClient implements RawdataClient {
     private ULID.Value ulidOfPosition(String topic, String position, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
         ULID.Value lowerBoundUlid = RawdataConsumer.beginningOf(approxTimestamp - tolerance.toMillis());
         ULID.Value upperBoundUlid = RawdataConsumer.beginningOf(approxTimestamp + tolerance.toMillis());
-        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, new GCSCursor(lowerBoundUlid, true))) {
+        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
             RawdataMessage message;
             while ((message = consumer.receive(2, TimeUnit.SECONDS)) != null) {
                 if (message.timestamp() > upperBoundUlid.timestamp()) {

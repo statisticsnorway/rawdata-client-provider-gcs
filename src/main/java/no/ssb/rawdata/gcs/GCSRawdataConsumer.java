@@ -28,16 +28,18 @@ import static java.util.Optional.ofNullable;
 
 class GCSRawdataConsumer implements RawdataConsumer {
 
+    final String bucket;
     final String topic;
-    final AtomicReference<NavigableMap<Long, Blob>> topicBlobsByFromTimestampRef = new AtomicReference<>();
+    final GCSTopicAvroFileCache gcsTopicAvroFileCache;
     final AtomicReference<Long> activeBlobFromKeyRef = new AtomicReference<>(null);
     final AtomicReference<DataFileReader<GenericRecord>> activeBlobDataFileReaderRef = new AtomicReference<>(null);
     final AtomicBoolean closed = new AtomicBoolean(false);
     final Deque<GCSRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
 
-    GCSRawdataConsumer(String bucket, String topic, GCSCursor cursor) {
+    GCSRawdataConsumer(String bucket, String topic, GCSCursor cursor, int maxGcsFileListingIntervalSeconds) {
+        this.bucket = bucket;
         this.topic = topic;
-        topicBlobsByFromTimestampRef.set(GCSRawdataUtils.getTopicBlobs(bucket, topic));
+        this.gcsTopicAvroFileCache = new GCSTopicAvroFileCache(bucket, topic, maxGcsFileListingIntervalSeconds);
         if (cursor == null) {
             seek(0);
         } else {
@@ -70,6 +72,7 @@ class GCSRawdataConsumer implements RawdataConsumer {
 
     @Override
     public RawdataMessage receive(int timeout, TimeUnit unit) throws InterruptedException, RawdataClosedException {
+        final long start = System.currentTimeMillis();
         GCSRawdataMessage preloadedMessage = preloadedMessages.poll();
         if (preloadedMessage != null) {
             return preloadedMessage;
@@ -80,13 +83,16 @@ class GCSRawdataConsumer implements RawdataConsumer {
         }
         if (!dataFileReader.hasNext()) {
             Long currentBlobKey = activeBlobFromKeyRef.get();
-            NavigableMap<Long, Blob> blobByFrom = topicBlobsByFromTimestampRef.get(); // TODO consider re-loading list from gcs
-            Map.Entry<Long, Blob> nextEntry = blobByFrom.higherEntry(currentBlobKey);
-            if (nextEntry == null) {
-                activeBlobDataFileReaderRef.set(null);
-                activeBlobFromKeyRef.set(null);
-                return null;
-                // TODO Continue from Cloud Pub-Sub skipping up to and including the last message returned earlier
+            Map.Entry<Long, Blob> nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
+            while (nextEntry == null) {
+                // TODO the GCS file-listing poll-loop can be replaced with notifications from pub/sub
+                // TODO if so, the poll-loop should be a fallback when google-pub/sub is unavailable
+                long duration = System.currentTimeMillis() - start;
+                if (duration > unit.toMillis(timeout)) {
+                    return null; // timeout
+                }
+                Thread.sleep(1000);
+                nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
             }
             activeBlobFromKeyRef.set(nextEntry.getKey());
             Blob blob = nextEntry.getValue();
@@ -139,9 +145,10 @@ class GCSRawdataConsumer implements RawdataConsumer {
                 throw new RuntimeException(e);
             }
         }
-        Map.Entry<Long, Blob> firstEntryHigherOrEqual = topicBlobsByFromTimestampRef.get().floorEntry(timestamp);
+        NavigableMap<Long, Blob> blobByFrom = gcsTopicAvroFileCache.blobsByTimestamp();
+        Map.Entry<Long, Blob> firstEntryHigherOrEqual = blobByFrom.floorEntry(timestamp);
         if (firstEntryHigherOrEqual == null) {
-            firstEntryHigherOrEqual = topicBlobsByFromTimestampRef.get().ceilingEntry(timestamp);
+            firstEntryHigherOrEqual = blobByFrom.ceilingEntry(timestamp);
         }
         if (firstEntryHigherOrEqual == null) {
             activeBlobFromKeyRef.set(null);
@@ -187,7 +194,7 @@ class GCSRawdataConsumer implements RawdataConsumer {
                 dataFileReader.close();
             }
             activeBlobFromKeyRef.set(null);
-            topicBlobsByFromTimestampRef.set(null);
+            gcsTopicAvroFileCache.clear();
             preloadedMessages.clear();
         }
     }

@@ -22,7 +22,8 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
                 "bucket",
                 "local-temp-folder",
                 "staging.max.seconds",
-                "staging.max.bytes"
+                "staging.max.bytes",
+                "gcs.listing.max-interval-seconds"
         );
     }
 
@@ -32,6 +33,7 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long stagingMaxSeconds = Long.parseLong(configuration.get("staging.max.seconds"));
         long stagingMaxBytes = Long.parseLong(configuration.get("staging.max.bytes"));
-        return new GCSRawdataClient(bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes);
+        int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.max-interval-seconds"));
+        return new GCSRawdataClient(bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes, gcsFileListingMaxIntervalSeconds);
     }
 }

@@ -63,6 +63,7 @@ public class GCSRawdataClientTck {
         configuration.put("local-temp-folder", "target/_tmp_avro_");
         configuration.put("staging.max.seconds", "30");
         configuration.put("staging.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB
+        configuration.put("gcs.listing.max-interval-seconds", "3");
 
         Path localTempFolder = Paths.get(configuration.get("local-temp-folder"));
         if (Files.exists(localTempFolder)) {
@@ -463,6 +464,67 @@ public class GCSRawdataClientTck {
             assertEquals(d.position(), "d");
             assertEquals(e.position(), "e");
             assertEquals(f.position(), "f");
+            assertEquals(g.position(), "g");
+            assertEquals(h.position(), "h");
+            assertEquals(i.position(), "i");
+        }
+    }
+
+    @Test
+    public void thatFilesCreatedAfterConsumerHasSubscribedAreUsed() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("a");
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("b");
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("c");
+        }
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("d").put("payload1", new byte[5]).put("payload2", new byte[5]));
+            producer.publish("d");
+            producer.buffer(producer.builder().position("e").put("payload1", new byte[3]).put("payload2", new byte[3]));
+            producer.publish("e");
+            producer.buffer(producer.builder().position("f").put("payload1", new byte[7]).put("payload2", new byte[7]));
+            producer.publish("f");
+        }
+
+        // start a background task that will wait 5 seconds, then publish 3 messages
+        CompletableFuture.runAsync(() -> {
+            try (RawdataProducer producer = client.producer("the-topic")) {
+                Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+                producer.buffer(producer.builder().position("g").put("payload1", new byte[5]).put("payload2", new byte[5]));
+                producer.publish("g");
+                producer.buffer(producer.builder().position("h").put("payload1", new byte[3]).put("payload2", new byte[3]));
+                producer.publish("h");
+                producer.buffer(producer.builder().position("i").put("payload1", new byte[7]).put("payload2", new byte[7]));
+                producer.publish("i");
+            } catch (RuntimeException | Error e) {
+                throw e;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        });
+
+        try (RawdataConsumer consumer = client.consumer("the-topic")) {
+            RawdataMessage a = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage b = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage c = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage d = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage e = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage f = consumer.receive(1, TimeUnit.SECONDS);
+            assertEquals(a.position(), "a");
+            assertEquals(b.position(), "b");
+            assertEquals(c.position(), "c");
+            assertEquals(d.position(), "d");
+            assertEquals(e.position(), "e");
+            assertEquals(f.position(), "f");
+
+            // until here is easy. After this point we have to wait for more files to appear on GCS
+
+            RawdataMessage g = consumer.receive(15, TimeUnit.SECONDS);
+            RawdataMessage h = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage i = consumer.receive(1, TimeUnit.SECONDS);
             assertEquals(g.position(), "g");
             assertEquals(h.position(), "h");
             assertEquals(i.position(), "i");
