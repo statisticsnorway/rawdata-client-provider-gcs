@@ -26,6 +26,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -56,6 +57,9 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
     final AtomicReference<Path> pathRef = new AtomicReference<>();
 
+    final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
+
+
     GCSRawdataProducer(String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
         this.bucket = bucket;
         this.tmpFolder = tmpFolder;
@@ -67,13 +71,40 @@ class GCSRawdataProducer implements RawdataProducer {
             Files.createDirectories(topicFolder);
             Path path = Files.createTempFile(topicFolder, "", ".avro");
             pathRef.set(path);
-            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
-            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriterRef.set(dataFileWriter);
-            try {
-                dataFileWriter.create(schema, path.toFile());
-            } catch (IOException e) {
-                throw new RuntimeException(e);
+            createOrOverwriteLocalAvroFile(path);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void createOrOverwriteLocalAvroFile(Path path) {
+        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+        DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
+        dataFileWriter.setSyncInterval(2 * 1024 * 1024); // 2 MiB
+        dataFileWriter.setFlushOnEveryBlock(true);
+        dataFileWriterRef.set(dataFileWriter);
+        try {
+            dataFileWriter.create(schema, path.toFile());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void closeAvroFileAndUploadToGCS() {
+        try {
+            DataFileWriter<GenericRecord> dataFileWriter = dataFileWriterRef.getAndSet(null);
+            if (dataFileWriter != null) {
+                dataFileWriter.flush();
+                dataFileWriter.close();
+            }
+            Path path = pathRef.get();
+            if (path != null) {
+                String fileName = computeFilenameOfLocalAvroFile(path.toFile());
+                if (fileName != null) {
+                    GCSRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
+                } else {
+                    // no records, no need to write file to GCS
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
@@ -103,10 +134,14 @@ class GCSRawdataProducer implements RawdataProducer {
     @Override
     public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
         for (String position : positions) {
+            long now = System.currentTimeMillis();
+            timestampOfFirstMessageInWindow.compareAndSet(-1, now);
 
-            boolean timeLimitExceeded = false; // TODO determine whether limit of stagingMaxSeconds is broken
+            boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * stagingMaxSeconds < now;
             if (timeLimitExceeded) {
-                // TODO close avro file, send file to GCS, re-open a new staging file overwriting the old one.
+                closeAvroFileAndUploadToGCS();
+                createOrOverwriteLocalAvroFile(pathRef.get());
+                timestampOfFirstMessageInWindow.set(now);
             }
 
             GCSRawdataMessage.Builder builder = buffer.remove(position);
@@ -133,9 +168,10 @@ class GCSRawdataProducer implements RawdataProducer {
                 throw new RuntimeException(e);
             }
 
-            boolean sizeLimitExceeded = false; // TODO determine whether limit of stagingMaxBytes is broken
+            boolean sizeLimitExceeded = pathRef.get().toFile().length() > stagingMaxBytes;
             if (sizeLimitExceeded) {
-                // TODO close avro file, send file to GCS, re-open a new staging file overwriting the old one.
+                closeAvroFileAndUploadToGCS();
+                createOrOverwriteLocalAvroFile(pathRef.get());
             }
         }
     }
@@ -154,21 +190,9 @@ class GCSRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         if (closed.compareAndSet(false, true)) {
-            DataFileWriter<GenericRecord> dataFileWriter = dataFileWriterRef.getAndSet(null);
-            if (dataFileWriter != null) {
-                dataFileWriter.close();
-            }
-            Path path = pathRef.getAndSet(null);
-            if (path != null) {
-                String fileName = computeFilenameOfLocalAvroFile(path.toFile());
-                if (fileName != null) {
-                    GCSRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
-                } else {
-                    // no records, no need to write file to GCS
-                }
-            }
+            closeAvroFileAndUploadToGCS();
             buffer.clear();
         }
     }
