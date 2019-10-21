@@ -4,10 +4,7 @@ import com.google.api.gax.paging.Page;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
-import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 import de.huxhorn.sulky.ulid.ULID;
-import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -48,13 +45,7 @@ import static org.testng.Assert.assertNull;
  */
 public class GCSRawdataClientTck {
 
-    static final Storage storage;
-
-    static {
-        storage = StorageOptions.getDefaultInstance().getService();
-    }
-
-    RawdataClient client;
+    GCSRawdataClient client;
 
     @BeforeMethod
     public void createRawdataClient() throws IOException {
@@ -70,14 +61,14 @@ public class GCSRawdataClientTck {
             Files.walk(localTempFolder).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
         }
         Files.createDirectories(localTempFolder);
-        client = ProviderConfigurator.configure(configuration, "gcs", RawdataClientInitializer.class);
+        client = (GCSRawdataClient) ProviderConfigurator.configure(configuration, "gcs", RawdataClientInitializer.class);
 
         // clear bucket
         String bucket = configuration.get("bucket");
-        Page<Blob> page = storage.list(bucket);
+        Page<Blob> page = client.storage.list(bucket);
         BlobId[] blobs = StreamSupport.stream(page.iterateAll().spliterator(), false).map(BlobInfo::getBlobId).collect(Collectors.toList()).toArray(new BlobId[0]);
         if (blobs.length > 0) {
-            List<Boolean> deletedList = storage.delete(blobs);
+            List<Boolean> deletedList = client.storage.delete(blobs);
             for (Boolean deleted : deletedList) {
                 if (!deleted) {
                     throw new RuntimeException("Unable to delete blob in bucket");

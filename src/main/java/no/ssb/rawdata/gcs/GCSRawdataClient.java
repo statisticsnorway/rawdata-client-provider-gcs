@@ -1,6 +1,7 @@
 package no.ssb.rawdata.gcs;
 
 import com.google.cloud.storage.Blob;
+import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
@@ -31,6 +32,7 @@ class GCSRawdataClient implements RawdataClient {
 
     final AtomicBoolean closed = new AtomicBoolean(false);
 
+    final Storage storage;
     final String bucket;
     final Path tmpFileFolder;
     final long stagingMaxSeconds;
@@ -40,7 +42,8 @@ class GCSRawdataClient implements RawdataClient {
     final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    GCSRawdataClient(String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
+    GCSRawdataClient(Storage storage, String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
+        this.storage = storage;
         this.bucket = bucket;
         this.tmpFileFolder = tmpFileFolder;
         this.stagingMaxSeconds = stagingMaxSeconds;
@@ -53,7 +56,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataProducer producer = new GCSRawdataProducer(bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
+        GCSRawdataProducer producer = new GCSRawdataProducer(storage, bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
         producers.add(producer);
         return producer;
     }
@@ -63,7 +66,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
+        GCSRawdataConsumer consumer = new GCSRawdataConsumer(storage, bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
         consumers.add(consumer);
         return consumer;
     }
@@ -81,7 +84,7 @@ class GCSRawdataClient implements RawdataClient {
     private ULID.Value ulidOfPosition(String topic, String position, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
         ULID.Value lowerBoundUlid = RawdataConsumer.beginningOf(approxTimestamp - tolerance.toMillis());
         ULID.Value upperBoundUlid = RawdataConsumer.beginningOf(approxTimestamp + tolerance.toMillis());
-        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
+        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(storage, bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
             RawdataMessage message;
             while ((message = consumer.receive(2, TimeUnit.SECONDS)) != null) {
                 if (message.timestamp() > upperBoundUlid.timestamp()) {
@@ -115,7 +118,7 @@ class GCSRawdataClient implements RawdataClient {
 
     @Override
     public RawdataMessage lastMessage(String topic) throws RawdataClosedException {
-        NavigableMap<Long, Blob> topicBlobs = GCSRawdataUtils.getTopicBlobs(bucket, topic);
+        NavigableMap<Long, Blob> topicBlobs = new GCSRawdataUtils(storage).getTopicBlobs(bucket, topic);
         if (topicBlobs.isEmpty()) {
             return null;
         }

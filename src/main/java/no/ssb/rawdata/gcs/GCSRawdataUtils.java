@@ -6,7 +6,6 @@ import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 
 import java.io.File;
 import java.io.IOException;
@@ -26,13 +25,13 @@ import java.util.stream.StreamSupport;
 
 class GCSRawdataUtils {
 
-    static final Storage storage;
-
-    static {
-        storage = StorageOptions.getDefaultInstance().getService();
-    }
+    final Storage storage;
 
     static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
+
+    GCSRawdataUtils(Storage storage) {
+        this.storage = storage;
+    }
 
     static String formatTimestamp(long timestamp) {
         ZonedDateTime zonedDateTime = ZonedDateTime.ofInstant(new Date(timestamp).toInstant(), ZoneOffset.UTC);
@@ -92,13 +91,13 @@ class GCSRawdataUtils {
         return parseTimestamp(to);
     }
 
-    static Stream<Blob> listTopicFiles(String bucketName, String topic) {
+    Stream<Blob> listTopicFiles(String bucketName, String topic) {
         Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic));
         Stream<Blob> stream = StreamSupport.stream(page.iterateAll().spliterator(), false);
         return stream.filter(blob -> !blob.isDirectory());
     }
 
-    static void copyLocalFileToGCSBlob(File file, BlobId blobId) throws IOException {
+    void copyLocalFileToGCSBlob(File file, BlobId blobId) throws IOException {
         try (WriteChannel writeChannel = storage.writer(BlobInfo.newBuilder(blobId)
                 .setContentType("text/plain")
                 .build())) {
@@ -118,9 +117,9 @@ class GCSRawdataUtils {
         }
     }
 
-    static NavigableMap<Long, Blob> getTopicBlobs(String bucket, String topic) {
+    NavigableMap<Long, Blob> getTopicBlobs(String bucket, String topic) {
         NavigableMap<Long, Blob> map = new TreeMap<>();
-        GCSRawdataUtils.listTopicFiles(bucket, topic).forEach(blob -> {
+        listTopicFiles(bucket, topic).forEach(blob -> {
             long fromTimestamp = GCSRawdataUtils.getFromTimestamp(blob.getBlobId());
             map.put(fromTimestamp, blob);
         });

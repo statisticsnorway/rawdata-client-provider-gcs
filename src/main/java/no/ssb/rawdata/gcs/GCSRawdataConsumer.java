@@ -1,6 +1,7 @@
 package no.ssb.rawdata.gcs;
 
 import com.google.cloud.storage.Blob;
+import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
@@ -36,10 +37,10 @@ class GCSRawdataConsumer implements RawdataConsumer {
     final AtomicBoolean closed = new AtomicBoolean(false);
     final Deque<GCSRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
 
-    GCSRawdataConsumer(String bucket, String topic, GCSCursor cursor, int maxGcsFileListingIntervalSeconds) {
+    GCSRawdataConsumer(Storage storage, String bucket, String topic, GCSCursor cursor, int maxGcsFileListingIntervalSeconds) {
         this.bucket = bucket;
         this.topic = topic;
-        this.gcsTopicAvroFileCache = new GCSTopicAvroFileCache(bucket, topic, maxGcsFileListingIntervalSeconds);
+        this.gcsTopicAvroFileCache = new GCSTopicAvroFileCache(storage, bucket, topic, maxGcsFileListingIntervalSeconds);
         if (cursor == null) {
             seek(0);
         } else {

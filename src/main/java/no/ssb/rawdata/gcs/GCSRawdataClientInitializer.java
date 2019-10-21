@@ -1,5 +1,7 @@
 package no.ssb.rawdata.gcs;
 
+import com.google.cloud.storage.Storage;
+import com.google.cloud.storage.StorageOptions;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.service.provider.api.ProviderName;
@@ -34,6 +36,9 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         long stagingMaxSeconds = Long.parseLong(configuration.get("staging.max.seconds"));
         long stagingMaxBytes = Long.parseLong(configuration.get("staging.max.bytes"));
         int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.max-interval-seconds"));
-        return new GCSRawdataClient(bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes, gcsFileListingMaxIntervalSeconds);
+
+        Storage storage = StorageOptions.getDefaultInstance().getService(); // TODO, replace with credentials from configuration
+
+        return new GCSRawdataClient(storage, bucket, localTempFolder, stagingMaxSeconds, stagingMaxBytes, gcsFileListingMaxIntervalSeconds);
     }
 }

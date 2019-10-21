@@ -1,6 +1,7 @@
 package no.ssb.rawdata.gcs;
 
 import com.google.cloud.storage.BlobId;
+import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -46,6 +47,7 @@ class GCSRawdataProducer implements RawdataProducer {
     final ULID ulid = new ULID();
     final AtomicReference<ULID.Value> prevUlid = new AtomicReference<>(ulid.nextValue());
 
+    final GCSRawdataUtils gcsRawdataUtils;
     final String bucket;
     final Path tmpFolder;
     final long stagingMaxSeconds;
@@ -60,7 +62,8 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
 
 
-    GCSRawdataProducer(String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
+    GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
+        this.gcsRawdataUtils = new GCSRawdataUtils(storage);
         this.bucket = bucket;
         this.tmpFolder = tmpFolder;
         this.stagingMaxSeconds = stagingMaxSeconds;
@@ -101,7 +104,7 @@ class GCSRawdataProducer implements RawdataProducer {
             if (path != null) {
                 String fileName = computeFilenameOfLocalAvroFile(path.toFile());
                 if (fileName != null) {
-                    GCSRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
+                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), BlobId.of(bucket, topic + "/" + fileName));
                 } else {
                     // no records, no need to write file to GCS
                 }
