@@ -27,4 +27,17 @@ created on GCS while tailing the stream.
 
 ## Example usage
 ```java
+    Map<String, String> configuration = Map.of(
+            "local-temp-folder", "temp",
+            "avro-file.max.seconds", "3600",
+            "avro-file.max.bytes", "10485760",
+            "gcs.bucket-name", "my-awesome-test-bucket",
+            "gcs.listing.min-interval-seconds", "3",
+            "gcs.service-account.key-file", "secret/my_gcs_sa.json"
+    );
+
+    RawdataClient client = ProviderConfigurator.configure(configuration,
+            "gcs", RawdataClientInitializer.class);
 ```
+
+For the full example, see the ExampleApp.java file in the src/test/java
