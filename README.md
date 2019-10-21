@@ -1,6 +1,12 @@
 # rawdata-client-provider-gcs
 Rawdata provider for Google Cloud Storage.
 
+Rawdata topics are organized such that each topic has a separate folder 
+of Avro files in GCS. All files in the topic folder are part of the stream, 
+and each file is named using the timestamp and position of the first message 
+in the file, and the total message count. The files have path according to
+the pattern: `/<topic-name>/<timestamp>_<count>_<position>.avro`
+
 Producers will keep a local Avro file to buffer all published 
 messages. When producer is closed, or a time or size limit is 
 reached, the local Avro file is uploaded to GCS into the configured
