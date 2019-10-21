@@ -19,7 +19,7 @@ steps:
     image: maven:3.6.0-jdk-11-slim
     commands:
       - mkdir secret
-      - echo "$GAC" > secret/gcs_sa_test.json
+      - printf "%s" "$GAC" > secret/gcs_sa_test.json
       - mvn test -P ssb-bip,coverage --update-snapshots --batch-mode --global-settings settings.xml
     environment:
       GAC:
