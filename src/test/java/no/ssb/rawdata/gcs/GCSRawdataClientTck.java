@@ -67,7 +67,7 @@ public class GCSRawdataClientTck {
         // clear bucket
         String bucket = configuration.get("gcs.bucket-name");
         Storage storage = client.getWritableStorage();
-        Page<Blob> page = storage.list(bucket);
+        Page<Blob> page = storage.list(bucket, Storage.BlobListOption.prefix("the-topic"));
         BlobId[] blobs = StreamSupport.stream(page.iterateAll().spliterator(), false).map(BlobInfo::getBlobId).collect(Collectors.toList()).toArray(new BlobId[0]);
         if (blobs.length > 0) {
             List<Boolean> deletedList = storage.delete(blobs);
