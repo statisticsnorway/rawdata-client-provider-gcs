@@ -57,6 +57,16 @@ public class GCSRawdataClientTck {
         configuration.put("gcs.listing.min-interval-seconds", "3");
         configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
 
+        String rawdataGcsBucket = System.getenv("RAWDATA_GCS_BUCKET");
+        if (rawdataGcsBucket != null) {
+            configuration.put("gcs.bucket-name", rawdataGcsBucket);
+        }
+
+        String rawdataGcsSaKeyFile = System.getenv("RAWDATA_GCS_SERVICE_ACCOUNT_KEY_FILE");
+        if (rawdataGcsSaKeyFile != null) {
+            configuration.put("gcs.service-account.key-file", rawdataGcsSaKeyFile);
+        }
+
         Path localTempFolder = Paths.get(configuration.get("local-temp-folder"));
         if (Files.exists(localTempFolder)) {
             Files.walk(localTempFolder).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
