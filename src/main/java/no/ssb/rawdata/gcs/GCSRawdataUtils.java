@@ -105,7 +105,7 @@ class GCSRawdataUtils {
     }
 
     Stream<Blob> listTopicFiles(String bucketName, String topic) {
-        Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic));
+        Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic + "/"));
         Stream<Blob> stream = StreamSupport.stream(page.iterateAll().spliterator(), false);
         return stream.filter(blob -> !blob.isDirectory());
     }
