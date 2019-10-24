@@ -21,9 +21,11 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 class GCSRawdataProducer implements RawdataProducer {
@@ -57,6 +59,8 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
     final GCSAvroFileMetadata activeAvrofileMetadata = new GCSAvroFileMetadata();
 
+    final ReentrantLock lock = new ReentrantLock();
+
     GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
         this.gcsRawdataUtils = new GCSRawdataUtils(storage);
         this.bucket = bucket;
@@ -76,20 +80,38 @@ class GCSRawdataProducer implements RawdataProducer {
     }
 
     private void createOrOverwriteLocalAvroFile(Path path) {
-        activeAvrofileMetadata.clear();
-        DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
-        DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-        dataFileWriter.setSyncInterval(2 * 1024 * 1024); // 2 MiB
-        dataFileWriter.setFlushOnEveryBlock(true);
-        dataFileWriterRef.set(dataFileWriter);
         try {
-            dataFileWriter.create(schema, path.toFile());
-        } catch (IOException e) {
+            if (!lock.tryLock(5, TimeUnit.MINUTES)) {
+                throw new IllegalStateException("Unable to acquire lock within 5 minutes");
+            }
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
+        }
+        try {
+            activeAvrofileMetadata.clear();
+            DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
+            DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
+            dataFileWriter.setSyncInterval(2 * 1024 * 1024); // 2 MiB
+            dataFileWriter.setFlushOnEveryBlock(true);
+            dataFileWriterRef.set(dataFileWriter);
+            try {
+                dataFileWriter.create(schema, path.toFile());
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } finally {
+            lock.unlock();
         }
     }
 
     private void closeAvroFileAndUploadToGCS() {
+        try {
+            if (!lock.tryLock(5, TimeUnit.MINUTES)) {
+                throw new IllegalStateException("Unable to acquire lock within 5 minutes");
+            }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
         try {
             DataFileWriter<GenericRecord> dataFileWriter = dataFileWriterRef.getAndSet(null);
             if (dataFileWriter != null) {
@@ -106,6 +128,8 @@ class GCSRawdataProducer implements RawdataProducer {
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
+        } finally {
+            lock.unlock();
         }
     }
 
@@ -134,50 +158,61 @@ class GCSRawdataProducer implements RawdataProducer {
         if (isClosed()) {
             throw new RawdataClosedException();
         }
-        for (String position : positions) {
-            long now = System.currentTimeMillis();
-            timestampOfFirstMessageInWindow.compareAndSet(-1, now);
-
-            boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * stagingMaxSeconds < now;
-            if (timeLimitExceeded) {
-                closeAvroFileAndUploadToGCS();
-                createOrOverwriteLocalAvroFile(pathRef.get());
-                timestampOfFirstMessageInWindow.set(now);
+        try {
+            if (!lock.tryLock(5, TimeUnit.MINUTES)) {
+                throw new IllegalStateException("Unable to acquire lock within 5 minutes");
             }
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
+        }
+        try {
+            for (String position : positions) {
+                long now = System.currentTimeMillis();
+                timestampOfFirstMessageInWindow.compareAndSet(-1, now);
 
-            GCSRawdataMessage.Builder builder = buffer.remove(position);
-            if (builder == null) {
-                throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
+                boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * stagingMaxSeconds < now;
+                if (timeLimitExceeded) {
+                    closeAvroFileAndUploadToGCS();
+                    createOrOverwriteLocalAvroFile(pathRef.get());
+                    timestampOfFirstMessageInWindow.set(now);
+                }
+
+                GCSRawdataMessage.Builder builder = buffer.remove(position);
+                if (builder == null) {
+                    throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
+                }
+                if (builder.ulid == null) {
+                    ULID.Value value = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
+                    builder.ulid(value);
+                }
+                GCSRawdataMessage message = builder.build();
+                prevUlid.set(message.ulid());
+
+                activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
+                activeAvrofileMetadata.setPositionOfFirstRecord(position);
+
+                try {
+                    GenericRecord record = new GenericData.Record(schema);
+                    record.put("id", new GenericData.Fixed(schema.getField("id").schema(), message.ulid().toBytes()));
+                    record.put("orderingGroup", message.orderingGroup());
+                    record.put("sequenceNumber", message.sequenceNumber());
+                    record.put("position", message.position());
+                    record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> ByteBuffer.wrap(e.getValue()))));
+
+                    dataFileWriterRef.get().append(record);
+                    activeAvrofileMetadata.incrementCounter(1);
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+
+                boolean sizeLimitExceeded = pathRef.get().toFile().length() > stagingMaxBytes;
+                if (sizeLimitExceeded) {
+                    closeAvroFileAndUploadToGCS();
+                    createOrOverwriteLocalAvroFile(pathRef.get());
+                }
             }
-            if (builder.ulid == null) {
-                ULID.Value value = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
-                builder.ulid(value);
-            }
-            GCSRawdataMessage message = builder.build();
-            prevUlid.set(message.ulid());
-
-            activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
-            activeAvrofileMetadata.setPositionOfFirstRecord(position);
-
-            try {
-                GenericRecord record = new GenericData.Record(schema);
-                record.put("id", new GenericData.Fixed(schema.getField("id").schema(), message.ulid().toBytes()));
-                record.put("orderingGroup", message.orderingGroup());
-                record.put("sequenceNumber", message.sequenceNumber());
-                record.put("position", message.position());
-                record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> ByteBuffer.wrap(e.getValue()))));
-
-                dataFileWriterRef.get().append(record);
-                activeAvrofileMetadata.incrementCounter(1);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-
-            boolean sizeLimitExceeded = pathRef.get().toFile().length() > stagingMaxBytes;
-            if (sizeLimitExceeded) {
-                closeAvroFileAndUploadToGCS();
-                createOrOverwriteLocalAvroFile(pathRef.get());
-            }
+        } finally {
+            lock.unlock();
         }
     }
 
