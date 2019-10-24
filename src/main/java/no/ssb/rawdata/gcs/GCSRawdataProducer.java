@@ -131,6 +131,9 @@ class GCSRawdataProducer implements RawdataProducer {
 
     @Override
     public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
+        if (isClosed()) {
+            throw new RawdataClosedException();
+        }
         for (String position : positions) {
             long now = System.currentTimeMillis();
             timestampOfFirstMessageInWindow.compareAndSet(-1, now);
