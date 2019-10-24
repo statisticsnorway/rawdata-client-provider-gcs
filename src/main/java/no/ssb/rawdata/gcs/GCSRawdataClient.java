@@ -43,20 +43,22 @@ class GCSRawdataClient implements RawdataClient {
     final Path serviceAccountKeyPath;
     final String bucket;
     final Path tmpFileFolder;
-    final long stagingMaxSeconds;
-    final long stagingMaxBytes;
+    final long avroMaxSeconds;
+    final long avroMaxBytes;
+    final int avroSyncInterval;
     final int gcsFileListingMaxIntervalSeconds;
     final ConcurrentMap<String, Storage> storageByAccessType = new ConcurrentHashMap<>();
 
     final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
     final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
 
-    GCSRawdataClient(Path serviceAccountKeyPath, String bucket, Path tmpFileFolder, long stagingMaxSeconds, long stagingMaxBytes, int gcsFileListingMaxIntervalSeconds) {
+    GCSRawdataClient(Path serviceAccountKeyPath, String bucket, Path tmpFileFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, int gcsFileListingMaxIntervalSeconds) {
         this.serviceAccountKeyPath = serviceAccountKeyPath;
         this.bucket = bucket;
         this.tmpFileFolder = tmpFileFolder;
-        this.stagingMaxSeconds = stagingMaxSeconds;
-        this.stagingMaxBytes = stagingMaxBytes;
+        this.avroMaxSeconds = avroMaxSeconds;
+        this.avroMaxBytes = avroMaxBytes;
+        this.avroSyncInterval = avroSyncInterval;
         this.gcsFileListingMaxIntervalSeconds = gcsFileListingMaxIntervalSeconds;
     }
 
@@ -93,7 +95,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataProducer producer = new GCSRawdataProducer(getWritableStorage(), bucket, tmpFileFolder, stagingMaxSeconds, stagingMaxBytes, topic);
+        GCSRawdataProducer producer = new GCSRawdataProducer(getWritableStorage(), bucket, tmpFileFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, topic);
         producers.add(producer);
         return producer;
     }

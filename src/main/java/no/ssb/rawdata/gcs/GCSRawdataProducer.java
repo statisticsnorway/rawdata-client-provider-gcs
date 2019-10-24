@@ -47,8 +47,9 @@ class GCSRawdataProducer implements RawdataProducer {
     final GCSRawdataUtils gcsRawdataUtils;
     final String bucket;
     final Path tmpFolder;
-    final long stagingMaxSeconds;
-    final long stagingMaxBytes;
+    final long avroMaxSeconds;
+    final long avroMaxBytes;
+    final int avroSyncInterval;
     final String topic;
 
     final Map<String, GCSRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
@@ -61,12 +62,13 @@ class GCSRawdataProducer implements RawdataProducer {
 
     final ReentrantLock lock = new ReentrantLock();
 
-    GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long stagingMaxSeconds, long stagingMaxBytes, String topic) {
+    GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, String topic) {
         this.gcsRawdataUtils = new GCSRawdataUtils(storage);
         this.bucket = bucket;
         this.tmpFolder = tmpFolder;
-        this.stagingMaxSeconds = stagingMaxSeconds;
-        this.stagingMaxBytes = stagingMaxBytes;
+        this.avroMaxSeconds = avroMaxSeconds;
+        this.avroMaxBytes = avroMaxBytes;
+        this.avroSyncInterval = avroSyncInterval;
         this.topic = topic;
         try {
             Path topicFolder = tmpFolder.resolve(topic);
@@ -91,7 +93,7 @@ class GCSRawdataProducer implements RawdataProducer {
             activeAvrofileMetadata.clear();
             DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
             DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriter.setSyncInterval(2 * 1024 * 1024); // 2 MiB
+            dataFileWriter.setSyncInterval(avroSyncInterval);
             dataFileWriter.setFlushOnEveryBlock(true);
             dataFileWriterRef.set(dataFileWriter);
             try {
@@ -170,7 +172,7 @@ class GCSRawdataProducer implements RawdataProducer {
                 long now = System.currentTimeMillis();
                 timestampOfFirstMessageInWindow.compareAndSet(-1, now);
 
-                boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * stagingMaxSeconds < now;
+                boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * avroMaxSeconds < now;
                 if (timeLimitExceeded) {
                     closeAvroFileAndUploadToGCS();
                     createOrOverwriteLocalAvroFile(pathRef.get());
@@ -205,7 +207,7 @@ class GCSRawdataProducer implements RawdataProducer {
                     throw new RuntimeException(e);
                 }
 
-                boolean sizeLimitExceeded = pathRef.get().toFile().length() > stagingMaxBytes;
+                boolean sizeLimitExceeded = pathRef.get().toFile().length() > avroMaxBytes;
                 if (sizeLimitExceeded) {
                     closeAvroFileAndUploadToGCS();
                     createOrOverwriteLocalAvroFile(pathRef.get());

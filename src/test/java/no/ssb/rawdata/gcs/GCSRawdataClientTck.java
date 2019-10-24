@@ -19,6 +19,7 @@ import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -53,7 +54,8 @@ public class GCSRawdataClientTck {
         configuration.put("gcs.bucket-name", "bip-drone-dependency-cache");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
         configuration.put("avro-file.max.seconds", "30");
-        configuration.put("avro-file.max.bytes", Long.toString(1 * 1024 * 1024)); // 1 MiB
+        configuration.put("avro-file.max.bytes", Long.toString(2 * 1024)); // 2 KiB
+        configuration.put("avro-file.sync.interval", Long.toString(500));
         configuration.put("gcs.listing.min-interval-seconds", "3");
         configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
 
@@ -470,6 +472,29 @@ public class GCSRawdataClientTck {
             assertEquals(g.position(), "g");
             assertEquals(h.position(), "h");
             assertEquals(i.position(), "i");
+        }
+    }
+
+    @Test
+    public void thatMultipleGCSFilesCanBeProducedThroughWindowingAndReadBack() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            for (int i = 0; i < 100; i++) {
+                producer.buffer(producer.builder().position("a" + i)
+                        .put("attribute-1", ("a" + i + "_").getBytes(StandardCharsets.UTF_8))
+                        .put("payload", "ABC_".repeat(i).getBytes(StandardCharsets.UTF_8)));
+                producer.publish("a" + i);
+            }
+        }
+
+        try (RawdataConsumer consumer = client.consumer("the-topic")) {
+            for (int i = 0; i < 100; i++) {
+                RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(msg.position(), "a" + i);
+                assertEquals(new String(msg.get("attribute-1"), StandardCharsets.UTF_8), "a" + i + "_");
+                assertEquals(new String(msg.get("payload"), StandardCharsets.UTF_8), "ABC_".repeat(i));
+            }
+            RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+            assertNull(msg);
         }
     }
 
