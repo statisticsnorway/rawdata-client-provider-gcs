@@ -53,7 +53,7 @@ public class GCSRawdataClientTck {
         Map<String, String> configuration = new LinkedHashMap<>();
         configuration.put("gcs.bucket-name", "bip-drone-dependency-cache");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
-        configuration.put("avro-file.max.seconds", "30");
+        configuration.put("avro-file.max.seconds", "3");
         configuration.put("avro-file.max.bytes", Long.toString(2 * 1024)); // 2 KiB
         configuration.put("avro-file.sync.interval", Long.toString(500));
         configuration.put("gcs.listing.min-interval-seconds", "3");
@@ -476,7 +476,7 @@ public class GCSRawdataClientTck {
     }
 
     @Test
-    public void thatMultipleGCSFilesCanBeProducedThroughWindowingAndReadBack() throws Exception {
+    public void thatMultipleGCSFilesCanBeProducedThroughSizeBasedWindowingAndReadBack() throws Exception {
         try (RawdataProducer producer = client.producer("the-topic")) {
             for (int i = 0; i < 100; i++) {
                 producer.buffer(producer.builder().position("a" + i)
@@ -492,6 +492,28 @@ public class GCSRawdataClientTck {
                 assertEquals(msg.position(), "a" + i);
                 assertEquals(new String(msg.get("attribute-1"), StandardCharsets.UTF_8), "a" + i + "_");
                 assertEquals(new String(msg.get("payload"), StandardCharsets.UTF_8), "ABC_".repeat(i));
+            }
+            RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+            assertNull(msg);
+        }
+    }
+
+    @Test
+    public void thatMultipleGCSFilesCanBeProducedThroughTimeBasedWindowingAndReadBack() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            for (int i = 0; i < 10; i++) {
+                producer.buffer(producer.builder().position("a" + i)
+                        .put("attribute-1", ("a" + i ).getBytes(StandardCharsets.UTF_8)));
+                producer.publish("a" + i);
+                Thread.sleep(500);
+            }
+        }
+
+        try (RawdataConsumer consumer = client.consumer("the-topic")) {
+            for (int i = 0; i < 10; i++) {
+                RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+                assertEquals(msg.position(), "a" + i);
+                assertEquals(new String(msg.get("attribute-1"), StandardCharsets.UTF_8), "a" + i);
             }
             RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
             assertNull(msg);
