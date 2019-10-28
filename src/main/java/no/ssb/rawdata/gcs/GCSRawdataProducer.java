@@ -1,5 +1,6 @@
 package no.ssb.rawdata.gcs;
 
+import com.google.cloud.storage.BlobId;
 import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
@@ -13,6 +14,8 @@ import org.apache.avro.generic.GenericData;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumWriter;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -29,6 +32,8 @@ import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
 
 class GCSRawdataProducer implements RawdataProducer {
+
+    static final Logger LOG = LoggerFactory.getLogger(GCSRawdataProducer.class);
 
     static final Schema schema = SchemaBuilder.record("RawdataMessage")
             .fields()
@@ -123,7 +128,11 @@ class GCSRawdataProducer implements RawdataProducer {
             Path path = pathRef.get();
             if (path != null) {
                 if (activeAvrofileMetadata.getCount() > 0) {
-                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), activeAvrofileMetadata.toBlobId(bucket, topic));
+                    BlobId blobId = activeAvrofileMetadata.toBlobId(bucket, topic);
+                    String fileSize = GCSRawdataUtils.humanReadableByteCount(path.toFile().length(), false);
+                    LOG.info("Copying Avro file {} ({}) to BlobId: {}", path.getFileName(), fileSize, blobId);
+                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), blobId);
+                    LOG.info("Copy COMPLETE! Avro file {}", path.getFileName());
                 } else {
                     // no records, no need to write file to GCS
                 }

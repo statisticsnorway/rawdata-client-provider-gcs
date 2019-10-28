@@ -17,6 +17,8 @@ import org.apache.avro.file.DataFileReader;
 import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericRecord;
 import org.apache.avro.io.DatumReader;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -37,6 +39,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 class GCSRawdataClient implements RawdataClient {
+
+    static final Logger LOG = LoggerFactory.getLogger(GCSRawdataClient.class);
 
     final AtomicBoolean closed = new AtomicBoolean(false);
 
@@ -162,6 +166,7 @@ class GCSRawdataClient implements RawdataClient {
             return null;
         }
         Blob blob = topicBlobs.lastEntry().getValue();
+        LOG.debug("Reading last message from GCS Blob: {}", blob.getBlobId());
         DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
         DataFileReader<GenericRecord> dataFileReader;
         try {
