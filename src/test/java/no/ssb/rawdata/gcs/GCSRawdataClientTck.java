@@ -55,7 +55,7 @@ public class GCSRawdataClientTck {
         configuration.put("local-temp-folder", "target/_tmp_avro_");
         configuration.put("avro-file.max.seconds", "3");
         configuration.put("avro-file.max.bytes", Long.toString(2 * 1024)); // 2 KiB
-        configuration.put("avro-file.sync.interval", Long.toString(500));
+        configuration.put("avro-file.sync.interval", Long.toString(200));
         configuration.put("gcs.listing.min-interval-seconds", "3");
         configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
 
@@ -503,7 +503,7 @@ public class GCSRawdataClientTck {
         try (RawdataProducer producer = client.producer("the-topic")) {
             for (int i = 0; i < 10; i++) {
                 producer.buffer(producer.builder().position("a" + i)
-                        .put("attribute-1", ("a" + i ).getBytes(StandardCharsets.UTF_8)));
+                        .put("attribute-1", ("a" + i).getBytes(StandardCharsets.UTF_8)));
                 producer.publish("a" + i);
                 Thread.sleep(500);
             }
@@ -625,5 +625,43 @@ public class GCSRawdataClientTck {
         }
 
         consumerThread.join();
+    }
+
+    @Test
+    public void thatReadLastMessageWorksWithMultipleBlocks() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[50]).put("payload2", new byte[50]));
+            producer.publish("a");
+            producer.buffer(producer.builder().position("b").put("payload1", new byte[30]).put("payload2", new byte[30]));
+            producer.publish("b");
+            producer.buffer(producer.builder().position("c").put("payload1", new byte[70]).put("payload2", new byte[70]));
+            producer.publish("c");
+            producer.buffer(producer.builder().position("d").put("payload1", new byte[50]).put("payload2", new byte[50]));
+            producer.publish("d");
+            producer.buffer(producer.builder().position("e").put("payload1", new byte[30]).put("payload2", new byte[30]));
+            producer.publish("e");
+            producer.buffer(producer.builder().position("f").put("payload1", new byte[70]).put("payload2", new byte[70]));
+            producer.publish("f");
+            producer.buffer(producer.builder().position("g").put("payload1", new byte[50]).put("payload2", new byte[50]));
+            producer.publish("g");
+            producer.buffer(producer.builder().position("h").put("payload1", new byte[30]).put("payload2", new byte[30]));
+            producer.publish("h");
+            producer.buffer(producer.builder().position("i").put("payload1", new byte[70]).put("payload2", new byte[70]));
+            producer.publish("i");
+        }
+
+        RawdataMessage lastMessage = client.lastMessage("the-topic");
+        assertEquals(lastMessage.position(), "i");
+    }
+
+    @Test
+    public void thatReadLastMessageWorksWithSingleBlock() throws Exception {
+        try (RawdataProducer producer = client.producer("the-topic")) {
+            producer.buffer(producer.builder().position("a").put("payload1", new byte[50]).put("payload2", new byte[50]));
+            producer.publish("a");
+        }
+
+        RawdataMessage lastMessage = client.lastMessage("the-topic");
+        assertEquals(lastMessage.position(), "a");
     }
 }

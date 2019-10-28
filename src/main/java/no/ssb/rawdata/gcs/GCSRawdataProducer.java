@@ -9,10 +9,14 @@ import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
+import org.apache.avro.file.DataFileReader;
 import org.apache.avro.file.DataFileWriter;
+import org.apache.avro.file.SeekableFileInput;
 import org.apache.avro.generic.GenericData;
+import org.apache.avro.generic.GenericDatumReader;
 import org.apache.avro.generic.GenericDatumWriter;
 import org.apache.avro.generic.GenericRecord;
+import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.DatumWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,6 +34,8 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.stream.Collectors;
+
+import static java.util.Optional.ofNullable;
 
 class GCSRawdataProducer implements RawdataProducer {
 
@@ -64,6 +70,7 @@ class GCSRawdataProducer implements RawdataProducer {
 
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
     final GCSAvroFileMetadata activeAvrofileMetadata = new GCSAvroFileMetadata();
+    final AtomicLong avroBytesWrittenInBlock = new AtomicLong(0);
 
     final ReentrantLock lock = new ReentrantLock();
 
@@ -98,11 +105,13 @@ class GCSRawdataProducer implements RawdataProducer {
             activeAvrofileMetadata.clear();
             DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
             DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriter.setSyncInterval(avroSyncInterval);
+            dataFileWriter.setSyncInterval(1 << 30);
             dataFileWriter.setFlushOnEveryBlock(true);
             dataFileWriterRef.set(dataFileWriter);
             try {
                 dataFileWriter.create(schema, path.toFile());
+                long lastSyncPosition = dataFileWriter.sync(); // position of first block
+                activeAvrofileMetadata.setSyncOfLastBlock(lastSyncPosition);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -129,6 +138,7 @@ class GCSRawdataProducer implements RawdataProducer {
             if (path != null) {
                 if (activeAvrofileMetadata.getCount() > 0) {
                     BlobId blobId = activeAvrofileMetadata.toBlobId(bucket, topic);
+                    verifySeekableToLastBlockOffsetAsGivenByFilename(path, GCSRawdataUtils.getOffsetOfLastBlock(blobId));
                     String fileSize = GCSRawdataUtils.humanReadableByteCount(path.toFile().length(), false);
                     LOG.info("Copying Avro file {} ({}) to BlobId: {}", path.getFileName(), fileSize, blobId);
                     gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), blobId);
@@ -141,6 +151,14 @@ class GCSRawdataProducer implements RawdataProducer {
             throw new RuntimeException(e);
         } finally {
             lock.unlock();
+        }
+    }
+
+    static void verifySeekableToLastBlockOffsetAsGivenByFilename(Path path, long offsetOfLastBlock) throws IOException {
+        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+        try (DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(new SeekableFileInput(path.toFile()), datumReader)) {
+            dataFileReader.seek(offsetOfLastBlock);
+            dataFileReader.hasNext(); // will throw an exception if offset is wrong
         }
     }
 
@@ -210,8 +228,15 @@ class GCSRawdataProducer implements RawdataProducer {
                     record.put("position", message.position());
                     record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> ByteBuffer.wrap(e.getValue()))));
 
+                    if (avroBytesWrittenInBlock.get() >= avroSyncInterval) {
+                        // start new block in avro file
+                        long lastSyncPosition = dataFileWriterRef.get().sync();
+                        activeAvrofileMetadata.setSyncOfLastBlock(lastSyncPosition);
+                        avroBytesWrittenInBlock.set(0);
+                    }
                     dataFileWriterRef.get().append(record);
                     activeAvrofileMetadata.incrementCounter(1);
+                    avroBytesWrittenInBlock.addAndGet(estimateAvroSizeOfRawdataMessage(message));
                 } catch (IOException e) {
                     throw new RuntimeException(e);
                 }
@@ -225,6 +250,16 @@ class GCSRawdataProducer implements RawdataProducer {
         } finally {
             lock.unlock();
         }
+    }
+
+    static long estimateAvroSizeOfRawdataMessage(GCSRawdataMessage message) {
+        return 16 + // ulid
+                2 + ofNullable(message.orderingGroup()).map(String::length).orElse(0) + // orderingGroup
+                6 + // sequenceNumber
+                2 + message.position().length() // position
+                + message.data().entrySet().stream()
+                .map(e -> 2L + e.getKey().length() + 4 + e.getValue().length)
+                .reduce(0L, Long::sum);
     }
 
     @Override

@@ -45,35 +45,42 @@ class GCSRawdataUtils {
 
     static final Pattern topicAndFilenamePattern = Pattern.compile("(?<topic>[^/]+)/(?<filename>.+)");
 
-    static String topic(BlobId blobId) {
+    private static Matcher topicMatcherOf(BlobId blobId) {
         Matcher topicAndFilenameMatcher = topicAndFilenamePattern.matcher(blobId.getName());
         if (!topicAndFilenameMatcher.matches()) {
             throw new RuntimeException("GCS BlobId does not match topicAndFilenamePattern. blobId=" + blobId.getName());
         }
+        return topicAndFilenameMatcher;
+    }
+
+    static String topic(BlobId blobId) {
+        Matcher topicAndFilenameMatcher = topicMatcherOf(blobId);
         String topic = topicAndFilenameMatcher.group("topic");
         return topic;
     }
 
     static String filename(BlobId blobId) {
-        Matcher topicAndFilenameMatcher = topicAndFilenamePattern.matcher(blobId.getName());
-        if (!topicAndFilenameMatcher.matches()) {
-            throw new RuntimeException("GCS BlobId does not match topicAndFilenamePattern. blobId=" + blobId.getName());
-        }
+        Matcher topicAndFilenameMatcher = topicMatcherOf(blobId);
         String filename = topicAndFilenameMatcher.group("filename");
         return filename;
     }
 
-    static final Pattern filenamePattern = Pattern.compile("(?<from>[^_]+)_(?<count>[0123456789]+)_(?<position>.+)\\.avro");
+    static final Pattern filenamePattern = Pattern.compile("(?<from>[^_]+)_(?<count>[0123456789]+)_(?<lastBlockOffset>[0123456789]+)_(?<position>.+)\\.avro");
 
-    /**
-     * @return lower-bound (inclusive) timestamp of this file range
-     */
-    static long getFromTimestamp(BlobId blobId) {
+    static Matcher filenameMatcherOf(BlobId blobId) {
         String filename = filename(blobId);
         Matcher filenameMatcher = filenamePattern.matcher(filename);
         if (!filenameMatcher.matches()) {
             throw new RuntimeException("GCS filename does not match filenamePattern. filename=" + filename);
         }
+        return filenameMatcher;
+    }
+
+    /**
+     * @return lower-bound (inclusive) timestamp of this file range
+     */
+    static long getFromTimestamp(BlobId blobId) {
+        Matcher filenameMatcher = filenameMatcherOf(blobId);
         String from = filenameMatcher.group("from");
         return parseTimestamp(from);
     }
@@ -82,11 +89,7 @@ class GCSRawdataUtils {
      * @return lower-bound (inclusive) position of this file range
      */
     static String getFirstPosition(BlobId blobId) {
-        String filename = filename(blobId);
-        Matcher filenameMatcher = filenamePattern.matcher(filename);
-        if (!filenameMatcher.matches()) {
-            throw new RuntimeException("GCS filename does not match filenamePattern. filename=" + filename);
-        }
+        Matcher filenameMatcher = filenameMatcherOf(blobId);
         String position = filenameMatcher.group("position");
         return position;
     }
@@ -95,13 +98,18 @@ class GCSRawdataUtils {
      * @return count of messages in the file
      */
     static long getMessageCount(BlobId blobId) {
-        String filename = filename(blobId);
-        Matcher filenameMatcher = filenamePattern.matcher(filename);
-        if (!filenameMatcher.matches()) {
-            throw new RuntimeException("GCS filename does not match filenamePattern. filename=" + filename);
-        }
+        Matcher filenameMatcher = filenameMatcherOf(blobId);
         long count = Long.parseLong(filenameMatcher.group("count"));
         return count;
+    }
+
+    /**
+     * @return count of messages in the file
+     */
+    static long getOffsetOfLastBlock(BlobId blobId) {
+        Matcher filenameMatcher = filenameMatcherOf(blobId);
+        long offset = Long.parseLong(filenameMatcher.group("lastBlockOffset"));
+        return offset;
     }
 
     Stream<Blob> listTopicFiles(String bucketName, String topic) {
@@ -151,7 +159,7 @@ class GCSRawdataUtils {
         int unit = si ? 1000 : 1024;
         if (bytes < unit) return bytes + " B";
         int exp = (int) (Math.log(bytes) / Math.log(unit));
-        String pre = (si ? "kMGTPE" : "KMGTPE").charAt(exp-1) + (si ? "" : "i");
+        String pre = (si ? "kMGTPE" : "KMGTPE").charAt(exp - 1) + (si ? "" : "i");
         return String.format("%.1f %sB", bytes / Math.pow(unit, exp), pre);
     }
 }

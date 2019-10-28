@@ -171,6 +171,7 @@ class GCSRawdataClient implements RawdataClient {
         DataFileReader<GenericRecord> dataFileReader;
         try {
             dataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
+            dataFileReader.seek(GCSRawdataUtils.getOffsetOfLastBlock(blob.getBlobId()));
             GenericRecord record = null;
             while (dataFileReader.hasNext()) {
                 record = dataFileReader.next(record);
