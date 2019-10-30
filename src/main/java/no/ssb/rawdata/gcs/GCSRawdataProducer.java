@@ -105,7 +105,7 @@ class GCSRawdataProducer implements RawdataProducer {
             activeAvrofileMetadata.clear();
             DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
             DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
-            dataFileWriter.setSyncInterval(1 << 30);
+            dataFileWriter.setSyncInterval(2 * avroSyncInterval);
             dataFileWriter.setFlushOnEveryBlock(true);
             dataFileWriterRef.set(dataFileWriter);
             try {
