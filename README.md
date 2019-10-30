@@ -27,7 +27,7 @@ created on GCS while tailing the stream.
 | local-temp-folder |temp |  yes | Path to local folder where topic folders and buffer-files can be created |
 | avro-file.max.seconds | 3600 | yes | Max number of seconds in a producer window |
 | avro-file.max.bytes | 10485760 | yes | Max number of bytes in a producer window |
-| avro-file.sync.interval | 524288 | yes | Will start a new Avro block after message that breaks this threshold is written |
+| avro-file.sync.interval | 524288 | yes | Block sync threshold in bytes. Will start a new Avro block after message that breaks this threshold is written |
 | gcs.bucket-name | test-bucket | yes | Name of bucket |
 | gcs.listing.min-interval-seconds | 60 | yes | Minimum number-of seconds between GCS list operations |
 | gcs.service-account.key-file | secret/my_gcs_sa.json | yes | Path to json service-account key file |
