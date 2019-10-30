@@ -3,9 +3,15 @@ Rawdata provider for Google Cloud Storage.
 
 Rawdata topics are organized such that each topic has a separate folder 
 of Avro files in GCS. All files in the topic folder are part of the stream, 
-and each file is named using the timestamp and position of the first message 
-in the file, and the total message count. The files have path according to
-the pattern: `/<topic-name>/<timestamp>_<count>_<position>.avro`
+and each file is named using the following pattern: <br/>
+`/<topic-name>/<timestamp>_<count>_<last-block-offset>_<position>.avro` <br/>
+where:
+- `<topic-name>` is the name of the topic (or stream)
+- `<timestamp>` is the timestamp of the first message in the file
+- `<count>` is the number of messages in the file
+- `<last-block-offset>` The position of the start of the last block in the file.
+RawdataClient.lastMessage() uses this to efficiently seek to the last block.
+- `<position>` is the value of the first position in the file
 
 Producers will keep a local Avro file to buffer all published 
 messages. When producer is closed, or a time or size limit is 
