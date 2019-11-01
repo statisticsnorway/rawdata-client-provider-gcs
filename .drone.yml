@@ -109,9 +109,3 @@ name: gcs_credentials
 get:
   path: drone-gcs-credentials
   name: gcs-credentials
----
-kind: secret
-name: gcs_credentials
-get:
-  path: drone-gcs-credentials
-  name: gcs-credentials
