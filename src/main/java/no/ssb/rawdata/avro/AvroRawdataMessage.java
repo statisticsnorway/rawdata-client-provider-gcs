@@ -1,4 +1,4 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro;
 
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-class GCSRawdataMessage implements RawdataMessage {
+class AvroRawdataMessage implements RawdataMessage {
 
     private final ULID.Value ulid;
     private final String orderingGroup;
@@ -15,7 +15,7 @@ class GCSRawdataMessage implements RawdataMessage {
     private final String position;
     private final Map<String, byte[]> data;
 
-    GCSRawdataMessage(ULID.Value ulid, String orderingGroup, long sequenceNumber, String position, Map<String, byte[]> data) {
+    AvroRawdataMessage(ULID.Value ulid, String orderingGroup, long sequenceNumber, String position, Map<String, byte[]> data) {
         this.ulid = ulid;
         this.orderingGroup = orderingGroup;
         this.sequenceNumber = sequenceNumber;
@@ -123,8 +123,8 @@ class GCSRawdataMessage implements RawdataMessage {
         }
 
         @Override
-        public GCSRawdataMessage build() {
-            return new GCSRawdataMessage(ulid, orderingGroup, sequenceNumber, position, data);
+        public AvroRawdataMessage build() {
+            return new AvroRawdataMessage(ulid, orderingGroup, sequenceNumber, position, data);
         }
     }
 }

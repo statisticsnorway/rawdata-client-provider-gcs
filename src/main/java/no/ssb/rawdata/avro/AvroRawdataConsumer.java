@@ -1,7 +1,5 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro;
 
-import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataConsumer;
@@ -27,27 +25,25 @@ import java.util.stream.Collectors;
 
 import static java.util.Optional.ofNullable;
 
-class GCSRawdataConsumer implements RawdataConsumer {
+class AvroRawdataConsumer implements RawdataConsumer {
 
-    final String bucket;
     final String topic;
-    final GCSTopicAvroFileCache gcsTopicAvroFileCache;
+    final TopicAvroFileCache gcsTopicAvroFileCache;
     final AtomicReference<Long> activeBlobFromKeyRef = new AtomicReference<>(-1L);
     final AtomicReference<DataFileReader<GenericRecord>> activeBlobDataFileReaderRef = new AtomicReference<>(null);
     final AtomicBoolean closed = new AtomicBoolean(false);
-    final Deque<GCSRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
+    final Deque<AvroRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
 
-    GCSRawdataConsumer(Storage storage, String bucket, String topic, GCSCursor cursor, int maxGcsFileListingIntervalSeconds) {
-        this.bucket = bucket;
+    AvroRawdataConsumer(AvroRawdataUtils gcsRawdataUtils, String topic, AvroRawdataCursor cursor, int minFileListingIntervalSeconds) {
         this.topic = topic;
-        this.gcsTopicAvroFileCache = new GCSTopicAvroFileCache(storage, bucket, topic, maxGcsFileListingIntervalSeconds);
+        this.gcsTopicAvroFileCache = new TopicAvroFileCache(gcsRawdataUtils, topic, minFileListingIntervalSeconds);
         if (cursor == null) {
             seek(0);
         } else {
             seek(cursor.ulid.timestamp());
             try {
-                GCSRawdataMessage msg;
-                while ((msg = (GCSRawdataMessage) receive(2, TimeUnit.SECONDS)) != null) {
+                AvroRawdataMessage msg;
+                while ((msg = (AvroRawdataMessage) receive(0, TimeUnit.SECONDS)) != null) {
                     if (msg.ulid().equals(cursor.ulid)) {
                         if (cursor.inclusive) {
                             preloadedMessages.addFirst(msg);
@@ -74,47 +70,47 @@ class GCSRawdataConsumer implements RawdataConsumer {
     @Override
     public RawdataMessage receive(int timeout, TimeUnit unit) throws InterruptedException, RawdataClosedException {
         final long start = System.currentTimeMillis();
-        GCSRawdataMessage preloadedMessage = preloadedMessages.poll();
+        AvroRawdataMessage preloadedMessage = preloadedMessages.poll();
         if (preloadedMessage != null) {
             return preloadedMessage;
         }
         DataFileReader<GenericRecord> dataFileReader = activeBlobDataFileReaderRef.get();
         if (dataFileReader == null) {
-            Map.Entry<Long, Blob> nextEntry = findNextGCSBlob(timeout, unit, start);
+            Map.Entry<Long, RawdataAvroFile> nextEntry = findNextGCSBlob(timeout, unit, start);
             if (nextEntry == null) return null; // timeout
             activeBlobFromKeyRef.set(nextEntry.getKey());
             dataFileReader = setDataFileReader(nextEntry.getValue());
         }
         if (!dataFileReader.hasNext()) {
-            Map.Entry<Long, Blob> nextEntry = findNextGCSBlob(timeout, unit, start);
+            Map.Entry<Long, RawdataAvroFile> nextEntry = findNextGCSBlob(timeout, unit, start);
             if (nextEntry == null) return null; // timeout
             activeBlobFromKeyRef.set(nextEntry.getKey());
-            Blob blob = nextEntry.getValue();
-            setDataFileReader(blob);
+            RawdataAvroFile rawdataAvroFile = nextEntry.getValue();
+            setDataFileReader(rawdataAvroFile);
             return receive(timeout, unit);
         }
         GenericRecord record = dataFileReader.next();
-        GCSRawdataMessage msg = toRawdataMessage(record);
+        AvroRawdataMessage msg = toRawdataMessage(record);
         return msg;
     }
 
-    private Map.Entry<Long, Blob> findNextGCSBlob(int timeout, TimeUnit unit, long start) throws InterruptedException {
+    private Map.Entry<Long, RawdataAvroFile> findNextGCSBlob(int timeout, TimeUnit unit, long start) throws InterruptedException {
         Long currentBlobKey = activeBlobFromKeyRef.get();
-        Map.Entry<Long, Blob> nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
+        Map.Entry<Long, RawdataAvroFile> nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
         while (nextEntry == null) {
             // TODO the GCS file-listing poll-loop can be replaced with notifications from pub/sub
             // TODO if so, the poll-loop should be a fallback when google-pub/sub is unavailable
             long duration = System.currentTimeMillis() - start;
-            if (duration > unit.toMillis(timeout)) {
+            if (duration >= unit.toMillis(timeout)) {
                 return null; // timeout
             }
-            Thread.sleep(1000);
+            Thread.sleep(500);
             nextEntry = gcsTopicAvroFileCache.blobsByTimestamp().higherEntry(currentBlobKey);
         }
         return nextEntry;
     }
 
-    static GCSRawdataMessage toRawdataMessage(GenericRecord record) {
+    static AvroRawdataMessage toRawdataMessage(GenericRecord record) {
         GenericData.Fixed id = (GenericData.Fixed) record.get("id");
         ULID.Value ulid = ULID.fromBytes(id.bytes());
         String orderingGroup = ofNullable(record.get("orderingGroup")).map(Object::toString).orElse(null);
@@ -123,7 +119,7 @@ class GCSRawdataConsumer implements RawdataConsumer {
         Map<Utf8, ByteBuffer> data = (Map<Utf8, ByteBuffer>) record.get("data");
         Map<String, byte[]> map = data.entrySet().stream().collect(Collectors.toMap(e -> e.getKey().toString(), e -> e.getValue().array()));
 
-        return new GCSRawdataMessage(ulid, orderingGroup, sequenceNumber, position, map);
+        return new AvroRawdataMessage(ulid, orderingGroup, sequenceNumber, position, map);
     }
 
     @Override
@@ -148,8 +144,8 @@ class GCSRawdataConsumer implements RawdataConsumer {
                 throw new RuntimeException(e);
             }
         }
-        NavigableMap<Long, Blob> blobByFrom = gcsTopicAvroFileCache.blobsByTimestamp();
-        Map.Entry<Long, Blob> firstEntryHigherOrEqual = blobByFrom.floorEntry(timestamp);
+        NavigableMap<Long, RawdataAvroFile> blobByFrom = gcsTopicAvroFileCache.blobsByTimestamp();
+        Map.Entry<Long, RawdataAvroFile> firstEntryHigherOrEqual = blobByFrom.floorEntry(timestamp);
         if (firstEntryHigherOrEqual == null) {
             firstEntryHigherOrEqual = blobByFrom.ceilingEntry(timestamp);
         }
@@ -158,13 +154,13 @@ class GCSRawdataConsumer implements RawdataConsumer {
             return;
         }
         activeBlobFromKeyRef.set(firstEntryHigherOrEqual.getKey());
-        Blob blob = firstEntryHigherOrEqual.getValue();
-        DataFileReader<GenericRecord> dataFileReader = setDataFileReader(blob);
+        RawdataAvroFile rawdataAvroFile = firstEntryHigherOrEqual.getValue();
+        DataFileReader<GenericRecord> dataFileReader = setDataFileReader(rawdataAvroFile);
         GenericRecord record = null;
         while (dataFileReader.hasNext()) {
             try {
                 record = dataFileReader.next(record);
-                GCSRawdataMessage message = toRawdataMessage(record);
+                AvroRawdataMessage message = toRawdataMessage(record);
                 long msgTimestamp = message.timestamp();
                 if (msgTimestamp >= timestamp) {
                     preloadedMessages.add(message);
@@ -176,11 +172,11 @@ class GCSRawdataConsumer implements RawdataConsumer {
         }
     }
 
-    private DataFileReader<GenericRecord> setDataFileReader(Blob blob) {
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+    private DataFileReader<GenericRecord> setDataFileReader(RawdataAvroFile rawdataAvroFile) {
+        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(AvroRawdataProducer.schema);
         DataFileReader<GenericRecord> dataFileReader;
         try {
-            dataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
+            dataFileReader = new DataFileReader<>(rawdataAvroFile.seekableInput(), datumReader);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

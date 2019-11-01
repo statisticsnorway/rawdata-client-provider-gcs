@@ -1,1 +1,2 @@
-no.ssb.rawdata.gcs.GCSRawdataClientInitializer
+no.ssb.rawdata.avro.cloudstorage.GCSRawdataClientInitializer
+no.ssb.rawdata.avro.filesystem.FilesystemAvroRawdataClientInitializer

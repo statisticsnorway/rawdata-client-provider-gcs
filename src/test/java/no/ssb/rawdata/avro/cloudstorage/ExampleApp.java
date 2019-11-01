@@ -1,4 +1,4 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro.cloudstorage;
 
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;

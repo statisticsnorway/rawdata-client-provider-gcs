@@ -1,7 +1,5 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro;
 
-import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -39,9 +37,9 @@ import java.util.stream.Collectors;
 
 import static java.util.Optional.ofNullable;
 
-class GCSRawdataProducer implements RawdataProducer {
+class AvroRawdataProducer implements RawdataProducer {
 
-    static final Logger LOG = LoggerFactory.getLogger(GCSRawdataProducer.class);
+    static final Logger LOG = LoggerFactory.getLogger(AvroRawdataProducer.class);
 
     static final Schema schema = SchemaBuilder.record("RawdataMessage")
             .fields()
@@ -57,22 +55,21 @@ class GCSRawdataProducer implements RawdataProducer {
     final ULID ulid = new ULID();
     final AtomicReference<ULID.Value> prevUlid = new AtomicReference<>(ulid.nextValue());
 
-    final GCSRawdataUtils gcsRawdataUtils;
-    final String bucket;
+    final AvroRawdataUtils gcsRawdataUtils;
     final Path tmpFolder;
     final long avroMaxSeconds;
     final long avroMaxBytes;
     final int avroSyncInterval;
     final String topic;
 
-    final Map<String, GCSRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
+    final Map<String, AvroRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
 
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
     final Path topicFolder;
     final AtomicReference<Path> pathRef = new AtomicReference<>();
 
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
-    final GCSAvroFileMetadata activeAvrofileMetadata = new GCSAvroFileMetadata();
+    final AvroFileMetadata activeAvrofileMetadata;
     final AtomicLong avroBytesWrittenInBlock = new AtomicLong(0);
 
     final ReentrantLock lock = new ReentrantLock();
@@ -81,23 +78,23 @@ class GCSRawdataProducer implements RawdataProducer {
     final BlockingQueue<Upload> uploadQueue = new LinkedBlockingQueue<>();
 
     static class Upload {
-        final Path path;
-        final BlobId blobId;
+        final Path source;
+        final RawdataAvroFile target;
 
-        Upload(Path path, BlobId blobId) {
-            this.path = path;
-            this.blobId = blobId;
+        Upload(Path source, RawdataAvroFile target) {
+            this.source = source;
+            this.target = target;
         }
     }
 
-    GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, String topic) {
-        this.gcsRawdataUtils = new GCSRawdataUtils(storage);
-        this.bucket = bucket;
+    AvroRawdataProducer(AvroRawdataUtils gcsRawdataUtils, Path tmpFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, String topic) {
+        this.gcsRawdataUtils = gcsRawdataUtils;
         this.tmpFolder = tmpFolder;
         this.avroMaxSeconds = avroMaxSeconds;
         this.avroMaxBytes = avroMaxBytes;
         this.avroSyncInterval = avroSyncInterval;
         this.topic = topic;
+        this.activeAvrofileMetadata = gcsRawdataUtils.newAvrofileMetadata();
         this.topicFolder = tmpFolder.resolve(topic);
         try {
             Files.createDirectories(topicFolder);
@@ -117,18 +114,19 @@ class GCSRawdataProducer implements RawdataProducer {
                     return;
                 }
                 try {
-                    if (upload.path == null) {
+                    if (upload.source == null) {
                         LOG.info("Upload thread for producer of topic {} received close signal and will now die.", topic);
                         return;
                     }
-                    verifySeekableToLastBlockOffsetAsGivenByFilename(upload.path, GCSRawdataUtils.getOffsetOfLastBlock(upload.blobId));
-                    String fileSize = GCSRawdataUtils.humanReadableByteCount(upload.path.toFile().length(), false);
-                    LOG.info("Copying Avro file {} ({}) to BlobId: {}", upload.path.getFileName(), fileSize, upload.blobId);
-                    gcsRawdataUtils.copyLocalFileToGCSBlob(upload.path.toFile(), upload.blobId);
-                    Files.delete(upload.path);
-                    LOG.info("Copy COMPLETE! Deleted Avro file {}", upload.path.getFileName());
+                    verifySeekableToLastBlockOffsetAsGivenByFilename(upload.source, upload.target.getOffsetOfLastBlock());
+                    String fileSize = AvroRawdataUtils.humanReadableByteCount(upload.source.toFile().length(), false);
+                    LOG.info("Copying Avro file {} ({}) to target: {}", upload.source.getFileName(), fileSize, upload.target);
+                    upload.target.copyFrom(upload.source);
+                    ;
+                    Files.delete(upload.source);
+                    LOG.info("Copy COMPLETE! Deleted Avro file {}", upload.source.getFileName());
                 } catch (Throwable t) {
-                    LOG.error(String.format("While uploading file %s to blobId %s", upload.path.getFileName(), upload.blobId), t);
+                    LOG.error(String.format("While uploading file %s to target %s", upload.source.getFileName(), upload.target), t);
                     LOG.warn("Closing producer topic {}", topic);
                     close();
                     LOG.warn("Upload thread for producer of topic {} will now die.", topic);
@@ -183,8 +181,8 @@ class GCSRawdataProducer implements RawdataProducer {
             Path path = pathRef.get();
             if (path != null) {
                 if (activeAvrofileMetadata.getCount() > 0) {
-                    BlobId blobId = activeAvrofileMetadata.toBlobId(bucket, topic);
-                    uploadQueue.add(new Upload(path, blobId)); // schedule upload asynchronously
+                    RawdataAvroFile rawdataAvroFile = activeAvrofileMetadata.toRawdataAvroFile(topic);
+                    uploadQueue.add(new Upload(path, rawdataAvroFile)); // schedule upload asynchronously
                 } else {
                     // no records, no need to write file to GCS
                 }
@@ -197,7 +195,7 @@ class GCSRawdataProducer implements RawdataProducer {
     }
 
     static void verifySeekableToLastBlockOffsetAsGivenByFilename(Path path, long offsetOfLastBlock) throws IOException {
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(AvroRawdataProducer.schema);
         try (DataFileReader<GenericRecord> dataFileReader = new DataFileReader<>(new SeekableFileInput(path.toFile()), datumReader)) {
             dataFileReader.seek(offsetOfLastBlock);
             dataFileReader.hasNext(); // will throw an exception if offset is wrong
@@ -211,12 +209,12 @@ class GCSRawdataProducer implements RawdataProducer {
 
     @Override
     public RawdataMessage.Builder builder() throws RawdataClosedException {
-        return new GCSRawdataMessage.Builder();
+        return new AvroRawdataMessage.Builder();
     }
 
     @Override
     public RawdataProducer buffer(RawdataMessage.Builder _builder) throws RawdataClosedException {
-        GCSRawdataMessage.Builder builder = (GCSRawdataMessage.Builder) _builder;
+        AvroRawdataMessage.Builder builder = (AvroRawdataMessage.Builder) _builder;
         if (isClosed()) {
             throw new RawdataClosedException();
         }
@@ -248,7 +246,7 @@ class GCSRawdataProducer implements RawdataProducer {
                     timestampOfFirstMessageInWindow.set(now);
                 }
 
-                GCSRawdataMessage.Builder builder = buffer.remove(position);
+                AvroRawdataMessage.Builder builder = buffer.remove(position);
                 if (builder == null) {
                     throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
                 }
@@ -256,7 +254,7 @@ class GCSRawdataProducer implements RawdataProducer {
                     ULID.Value value = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
                     builder.ulid(value);
                 }
-                GCSRawdataMessage message = builder.build();
+                AvroRawdataMessage message = builder.build();
                 prevUlid.set(message.ulid());
 
                 activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
@@ -294,7 +292,7 @@ class GCSRawdataProducer implements RawdataProducer {
         }
     }
 
-    static long estimateAvroSizeOfRawdataMessage(GCSRawdataMessage message) {
+    static long estimateAvroSizeOfRawdataMessage(AvroRawdataMessage message) {
         return 16 + // ulid
                 2 + ofNullable(message.orderingGroup()).map(String::length).orElse(0) + // orderingGroup
                 6 + // sequenceNumber

@@ -1,11 +1,7 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro.filesystem;
 
-import com.google.api.gax.paging.Page;
-import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.BlobInfo;
-import com.google.cloud.storage.Storage;
 import de.huxhorn.sulky.ulid.ULID;
+import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
@@ -31,64 +27,40 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import static org.testng.Assert.assertEquals;
 import static org.testng.Assert.assertNotNull;
 import static org.testng.Assert.assertNull;
 
-/**
- * Running these tests requires an accessible google-cloud-storage bucket with read and write object access.
- * <p>
- * Requirements: A google cloud service-account key with access to read and write objects in cloud-storage.
- * This can be put as a file at the path "secret/gcs_sa_test.json"
- */
-public class GCSRawdataClientTck {
+public class FilesystemAvroRawdataClientTck {
 
-    GCSRawdataClient client;
+    RawdataClient client;
 
     @BeforeMethod
     public void createRawdataClient() throws IOException {
         Map<String, String> configuration = new LinkedHashMap<>();
-        configuration.put("gcs.bucket-name", "bip-drone-dependency-cache");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
-        configuration.put("avro-file.max.seconds", "3");
+        configuration.put("avro-file.max.seconds", "2");
         configuration.put("avro-file.max.bytes", Long.toString(2 * 1024)); // 2 KiB
         configuration.put("avro-file.sync.interval", Long.toString(200));
-        configuration.put("gcs.listing.min-interval-seconds", "3");
-        configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
+        configuration.put("listing.min-interval-seconds", "0");
+        configuration.put("filesystem.storage-folder", "target/rawdata-store");
 
-        String rawdataGcsBucket = System.getenv("RAWDATA_GCS_BUCKET");
-        if (rawdataGcsBucket != null) {
-            configuration.put("gcs.bucket-name", rawdataGcsBucket);
-        }
-
-        String rawdataGcsSaKeyFile = System.getenv("RAWDATA_GCS_SERVICE_ACCOUNT_KEY_FILE");
-        if (rawdataGcsSaKeyFile != null) {
-            configuration.put("gcs.service-account.key-file", rawdataGcsSaKeyFile);
-        }
-
-        Path localTempFolder = Paths.get(configuration.get("local-temp-folder"));
-        if (Files.exists(localTempFolder)) {
-            Files.walk(localTempFolder).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
-        }
-        Files.createDirectories(localTempFolder);
-        client = (GCSRawdataClient) ProviderConfigurator.configure(configuration, "gcs", RawdataClientInitializer.class);
-
-        // clear bucket
-        String bucket = configuration.get("gcs.bucket-name");
-        Storage storage = client.getWritableStorage();
-        Page<Blob> page = storage.list(bucket, Storage.BlobListOption.prefix("the-topic"));
-        BlobId[] blobs = StreamSupport.stream(page.iterateAll().spliterator(), false).map(BlobInfo::getBlobId).collect(Collectors.toList()).toArray(new BlobId[0]);
-        if (blobs.length > 0) {
-            List<Boolean> deletedList = storage.delete(blobs);
-            for (Boolean deleted : deletedList) {
-                if (!deleted) {
-                    throw new RuntimeException("Unable to delete blob in bucket");
-                }
+        {
+            Path folder = Paths.get(configuration.get("local-temp-folder"));
+            if (Files.exists(folder)) {
+                Files.walk(folder).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
             }
+            Files.createDirectories(folder);
         }
+        {
+            Path folder = Paths.get(configuration.get("filesystem.storage-folder"));
+            if (Files.exists(folder)) {
+                Files.walk(folder).sorted(Comparator.reverseOrder()).map(Path::toFile).forEach(File::delete);
+            }
+            Files.createDirectories(folder);
+        }
+        client = ProviderConfigurator.configure(configuration, "filesystem", RawdataClientInitializer.class);
     }
 
     @AfterMethod
@@ -131,8 +103,8 @@ public class GCSRawdataClientTck {
         ULID.Value ulid = new ULID().nextValue();
         try (RawdataProducer producer = client.producer("the-topic")) {
             producer.buffer(producer.builder().ulid(ulid).orderingGroup("og1").sequenceNumber(1).position("a").put("payload1", new byte[3]).put("payload2", new byte[7]));
-            producer.buffer(producer.builder().ulid(ulid).orderingGroup("og1").sequenceNumber(1).position("b").put("payload1", new byte[4]).put("payload2", new byte[8]));
-            producer.buffer(producer.builder().ulid(ulid).orderingGroup("og1").sequenceNumber(1).position("c").put("payload1", new byte[2]).put("payload2", new byte[5]));
+            producer.buffer(producer.builder().orderingGroup("og1").sequenceNumber(1).position("b").put("payload1", new byte[4]).put("payload2", new byte[8]));
+            producer.buffer(producer.builder().orderingGroup("og1").sequenceNumber(1).position("c").put("payload1", new byte[2]).put("payload2", new byte[5]));
             producer.publish("a", "b", "c");
         }
 
@@ -149,7 +121,7 @@ public class GCSRawdataClientTck {
             }
             {
                 RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
-                assertEquals(message.ulid(), ulid);
+                assertNotNull(message.ulid());
                 assertEquals(message.orderingGroup(), "og1");
                 assertEquals(message.sequenceNumber(), 1);
                 assertEquals(message.position(), "b");
@@ -159,7 +131,7 @@ public class GCSRawdataClientTck {
             }
             {
                 RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
-                assertEquals(message.ulid(), ulid);
+                assertNotNull(message.ulid());
                 assertEquals(message.orderingGroup(), "og1");
                 assertEquals(message.sequenceNumber(), 1);
                 assertEquals(message.position(), "c");
@@ -493,29 +465,32 @@ public class GCSRawdataClientTck {
                 assertEquals(new String(msg.get("attribute-1"), StandardCharsets.UTF_8), "a" + i + "_");
                 assertEquals(new String(msg.get("payload"), StandardCharsets.UTF_8), "ABC_".repeat(i));
             }
-            RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage msg = consumer.receive(100, TimeUnit.MILLISECONDS);
             assertNull(msg);
         }
     }
 
     @Test
     public void thatMultipleGCSFilesCanBeProducedThroughTimeBasedWindowingAndReadBack() throws Exception {
+        int N = 3;
         try (RawdataProducer producer = client.producer("the-topic")) {
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < N; i++) {
                 producer.buffer(producer.builder().position("a" + i)
                         .put("attribute-1", ("a" + i).getBytes(StandardCharsets.UTF_8)));
                 producer.publish("a" + i);
-                Thread.sleep(500);
+                if (i < N - 1) {
+                    Thread.sleep(1100);
+                }
             }
         }
 
         try (RawdataConsumer consumer = client.consumer("the-topic")) {
-            for (int i = 0; i < 10; i++) {
+            for (int i = 0; i < N; i++) {
                 RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
                 assertEquals(msg.position(), "a" + i);
                 assertEquals(new String(msg.get("attribute-1"), StandardCharsets.UTF_8), "a" + i);
             }
-            RawdataMessage msg = consumer.receive(1, TimeUnit.SECONDS);
+            RawdataMessage msg = consumer.receive(10, TimeUnit.MILLISECONDS);
             assertNull(msg);
         }
     }
@@ -539,10 +514,10 @@ public class GCSRawdataClientTck {
             producer.publish("f");
         }
 
-        // start a background task that will wait 5 seconds, then publish 3 messages
+        // start a background task that will wait 1 second, then publish 3 messages
         CompletableFuture.runAsync(() -> {
             try (RawdataProducer producer = client.producer("the-topic")) {
-                Thread.sleep(TimeUnit.SECONDS.toMillis(5));
+                Thread.sleep(TimeUnit.SECONDS.toMillis(1));
                 producer.buffer(producer.builder().position("g").put("payload1", new byte[5]).put("payload2", new byte[5]));
                 producer.publish("g");
                 producer.buffer(producer.builder().position("h").put("payload1", new byte[3]).put("payload2", new byte[3]));
@@ -585,13 +560,13 @@ public class GCSRawdataClientTck {
     public void thatNonExistentStreamCanBeConsumedFirstAndProducedAfter() throws Exception {
         Thread consumerThread = new Thread(() -> {
             try (RawdataConsumer consumer = client.consumer("the-topic")) {
-                RawdataMessage a = consumer.receive(15, TimeUnit.SECONDS);
-                RawdataMessage b = consumer.receive(1, TimeUnit.SECONDS);
-                RawdataMessage c = consumer.receive(1, TimeUnit.SECONDS);
-                RawdataMessage d = consumer.receive(1, TimeUnit.SECONDS);
-                RawdataMessage e = consumer.receive(1, TimeUnit.SECONDS);
-                RawdataMessage f = consumer.receive(1, TimeUnit.SECONDS);
-                RawdataMessage none = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage a = consumer.receive(1, TimeUnit.SECONDS);
+                RawdataMessage b = consumer.receive(100, TimeUnit.MILLISECONDS);
+                RawdataMessage c = consumer.receive(100, TimeUnit.MILLISECONDS);
+                RawdataMessage d = consumer.receive(100, TimeUnit.MILLISECONDS);
+                RawdataMessage e = consumer.receive(100, TimeUnit.MILLISECONDS);
+                RawdataMessage f = consumer.receive(100, TimeUnit.MILLISECONDS);
+                RawdataMessage none = consumer.receive(100, TimeUnit.MILLISECONDS);
                 assertEquals(a.position(), "a");
                 assertEquals(b.position(), "b");
                 assertEquals(c.position(), "c");
@@ -605,7 +580,7 @@ public class GCSRawdataClientTck {
         });
         consumerThread.start();
 
-        Thread.sleep(1500);
+        Thread.sleep(300);
 
         try (RawdataProducer producer = client.producer("the-topic")) {
             producer.buffer(producer.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]));
@@ -614,8 +589,6 @@ public class GCSRawdataClientTck {
             producer.publish("b");
             producer.buffer(producer.builder().position("c").put("payload1", new byte[7]).put("payload2", new byte[7]));
             producer.publish("c");
-        }
-        try (RawdataProducer producer = client.producer("the-topic")) {
             producer.buffer(producer.builder().position("d").put("payload1", new byte[5]).put("payload2", new byte[5]));
             producer.publish("d");
             producer.buffer(producer.builder().position("e").put("payload1", new byte[3]).put("payload2", new byte[3]));

@@ -1,7 +1,8 @@
 import no.ssb.rawdata.api.RawdataClientInitializer;
-import no.ssb.rawdata.gcs.GCSRawdataClientInitializer;
+import no.ssb.rawdata.avro.cloudstorage.GCSRawdataClientInitializer;
+import no.ssb.rawdata.avro.filesystem.FilesystemAvroRawdataClientInitializer;
 
-module no.ssb.rawdata.gcs {
+module no.ssb.rawdata.avro {
     requires no.ssb.rawdata.api;
     requires no.ssb.service.provider.api;
     requires org.slf4j;
@@ -13,5 +14,5 @@ module no.ssb.rawdata.gcs {
     requires com.google.auth.oauth2;
     requires com.google.auth;
 
-    provides RawdataClientInitializer with GCSRawdataClientInitializer;
+    provides RawdataClientInitializer with GCSRawdataClientInitializer, FilesystemAvroRawdataClientInitializer;
 }

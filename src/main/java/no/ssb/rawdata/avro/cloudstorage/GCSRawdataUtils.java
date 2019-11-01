@@ -1,21 +1,13 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro.cloudstorage;
 
 import com.google.api.gax.paging.Page;
-import com.google.cloud.WriteChannel;
 import com.google.cloud.storage.Blob;
 import com.google.cloud.storage.BlobId;
-import com.google.cloud.storage.BlobInfo;
 import com.google.cloud.storage.Storage;
+import no.ssb.rawdata.avro.AvroFileMetadata;
+import no.ssb.rawdata.avro.AvroRawdataUtils;
+import no.ssb.rawdata.avro.RawdataAvroFile;
 
-import java.io.File;
-import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.nio.channels.FileChannel;
-import java.nio.channels.WritableByteChannel;
-import java.time.ZoneOffset;
-import java.time.ZonedDateTime;
-import java.time.format.DateTimeFormatter;
-import java.util.Date;
 import java.util.NavigableMap;
 import java.util.TreeMap;
 import java.util.regex.Matcher;
@@ -23,29 +15,19 @@ import java.util.regex.Pattern;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
-class GCSRawdataUtils {
+class GCSRawdataUtils implements AvroRawdataUtils {
 
     final Storage storage;
+    final String bucket;
 
-    static final DateTimeFormatter dateTimeFormatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-
-    GCSRawdataUtils(Storage storage) {
+    GCSRawdataUtils(Storage storage, String bucket) {
         this.storage = storage;
-    }
-
-    static String formatTimestamp(long timestamp) {
-        ZonedDateTime zonedDateTime = ZonedDateTime.ofInstant(new Date(timestamp).toInstant(), ZoneOffset.UTC);
-        return zonedDateTime.format(dateTimeFormatter);
-    }
-
-    static long parseTimestamp(String timestamp) {
-        ZonedDateTime zonedDateTime = ZonedDateTime.parse(timestamp, dateTimeFormatter);
-        return zonedDateTime.toInstant().toEpochMilli();
+        this.bucket = bucket;
     }
 
     static final Pattern topicAndFilenamePattern = Pattern.compile("(?<topic>[^/]+)/(?<filename>.+)");
 
-    private static Matcher topicMatcherOf(BlobId blobId) {
+    static Matcher topicMatcherOf(BlobId blobId) {
         Matcher topicAndFilenameMatcher = topicAndFilenamePattern.matcher(blobId.getName());
         if (!topicAndFilenameMatcher.matches()) {
             throw new RuntimeException("GCS BlobId does not match topicAndFilenamePattern. blobId=" + blobId.getName());
@@ -79,16 +61,16 @@ class GCSRawdataUtils {
     /**
      * @return lower-bound (inclusive) timestamp of this file range
      */
-    static long getFromTimestamp(BlobId blobId) {
+    long getFromTimestamp(BlobId blobId) {
         Matcher filenameMatcher = filenameMatcherOf(blobId);
         String from = filenameMatcher.group("from");
-        return parseTimestamp(from);
+        return AvroRawdataUtils.parseTimestamp(from);
     }
 
     /**
      * @return lower-bound (inclusive) position of this file range
      */
-    static String getFirstPosition(BlobId blobId) {
+    String getFirstPosition(BlobId blobId) {
         Matcher filenameMatcher = filenameMatcherOf(blobId);
         String position = filenameMatcher.group("position");
         return position;
@@ -97,7 +79,7 @@ class GCSRawdataUtils {
     /**
      * @return count of messages in the file
      */
-    static long getMessageCount(BlobId blobId) {
+    long getMessageCount(BlobId blobId) {
         Matcher filenameMatcher = filenameMatcherOf(blobId);
         long count = Long.parseLong(filenameMatcher.group("count"));
         return count;
@@ -118,48 +100,18 @@ class GCSRawdataUtils {
         return stream.filter(blob -> !blob.isDirectory());
     }
 
-    void copyLocalFileToGCSBlob(File file, BlobId blobId) throws IOException {
-        try (WriteChannel writeChannel = storage.writer(BlobInfo.newBuilder(blobId)
-                .setContentType("text/plain")
-                .build())) {
-            writeChannel.setChunkSize(8 * 1024 * 1024); // 8 MiB
-            copyFromFileToChannel(file, writeChannel);
-        }
-    }
-
-    static void copyFromFileToChannel(File file, WritableByteChannel target) {
-        try (FileChannel source = new RandomAccessFile(file, "r").getChannel()) {
-            long bytesTransferred = 0;
-            while (bytesTransferred < source.size()) {
-                bytesTransferred += source.transferTo(bytesTransferred, source.size(), target);
-            }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    NavigableMap<Long, Blob> getTopicBlobs(String bucket, String topic) {
-        NavigableMap<Long, Blob> map = new TreeMap<>();
+    @Override
+    public NavigableMap<Long, RawdataAvroFile> getTopicBlobs(String topic) {
+        NavigableMap<Long, RawdataAvroFile> map = new TreeMap<>();
         listTopicFiles(bucket, topic).forEach(blob -> {
-            long fromTimestamp = GCSRawdataUtils.getFromTimestamp(blob.getBlobId());
-            map.put(fromTimestamp, blob);
+            long fromTimestamp = getFromTimestamp(blob.getBlobId());
+            map.put(fromTimestamp, new GCSRawdataAvroFile(storage, blob));
         });
         return map;
     }
 
-    /**
-     * Code copied from article posted by https://stackoverflow.com/users/276052/aioobe :
-     * https://stackoverflow.com/questions/3758606/how-to-convert-byte-size-into-human-readable-format-in-java
-     *
-     * @param bytes
-     * @param si
-     * @return
-     */
-    static String humanReadableByteCount(long bytes, boolean si) {
-        int unit = si ? 1000 : 1024;
-        if (bytes < unit) return bytes + " B";
-        int exp = (int) (Math.log(bytes) / Math.log(unit));
-        String pre = (si ? "kMGTPE" : "KMGTPE").charAt(exp - 1) + (si ? "" : "i");
-        return String.format("%.1f %sB", bytes / Math.pow(unit, exp), pre);
+    @Override
+    public AvroFileMetadata newAvrofileMetadata() {
+        return new GCSAvroFileMetadata(storage, bucket);
     }
 }

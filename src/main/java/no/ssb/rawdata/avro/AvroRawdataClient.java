@@ -1,10 +1,5 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro;
 
-import com.google.auth.oauth2.GoogleCredentials;
-import com.google.auth.oauth2.ServiceAccountCredentials;
-import com.google.cloud.storage.Blob;
-import com.google.cloud.storage.Storage;
-import com.google.cloud.storage.StorageOptions;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClosedException;
@@ -21,77 +16,43 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.Arrays;
 import java.util.Date;
 import java.util.List;
 import java.util.NavigableMap;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-class GCSRawdataClient implements RawdataClient {
+public class AvroRawdataClient implements RawdataClient {
 
-    static final Logger LOG = LoggerFactory.getLogger(GCSRawdataClient.class);
+    static final Logger LOG = LoggerFactory.getLogger(AvroRawdataClient.class);
 
     final AtomicBoolean closed = new AtomicBoolean(false);
 
-    final Path serviceAccountKeyPath;
-    final String bucket;
     final Path tmpFileFolder;
     final long avroMaxSeconds;
     final long avroMaxBytes;
     final int avroSyncInterval;
-    final int gcsFileListingMaxIntervalSeconds;
-    final ConcurrentMap<String, Storage> storageByAccessType = new ConcurrentHashMap<>();
+    final int fileListingMinIntervalSeconds;
 
-    final List<GCSRawdataProducer> producers = new CopyOnWriteArrayList<>();
-    final List<GCSRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
+    final List<AvroRawdataProducer> producers = new CopyOnWriteArrayList<>();
+    final List<AvroRawdataConsumer> consumers = new CopyOnWriteArrayList<>();
+    final AvroRawdataUtils readOnlyAvroRawdataUtils;
+    final AvroRawdataUtils readWriteAvroRawdataUtils;
 
-    GCSRawdataClient(Path serviceAccountKeyPath, String bucket, Path tmpFileFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, int gcsFileListingMaxIntervalSeconds) {
-        this.serviceAccountKeyPath = serviceAccountKeyPath;
-        this.bucket = bucket;
+    public AvroRawdataClient(Path tmpFileFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, int fileListingMinIntervalSeconds, AvroRawdataUtils readOnlyAvroRawdataUtils, AvroRawdataUtils readWriteAvroRawdataUtils) {
         this.tmpFileFolder = tmpFileFolder;
         this.avroMaxSeconds = avroMaxSeconds;
         this.avroMaxBytes = avroMaxBytes;
         this.avroSyncInterval = avroSyncInterval;
-        this.gcsFileListingMaxIntervalSeconds = gcsFileListingMaxIntervalSeconds;
-    }
-
-    Storage getWritableStorage() {
-        return storageByAccessType.computeIfAbsent("read-write", k -> {
-            ServiceAccountCredentials sourceCredentials;
-            try {
-                sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
-            Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
-            return storage;
-        });
-    }
-
-    Storage getReadOnlyStorage() {
-        return storageByAccessType.computeIfAbsent("read-only", k -> {
-            ServiceAccountCredentials sourceCredentials;
-            try {
-                sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_only"));
-            Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
-            return storage;
-        });
+        this.fileListingMinIntervalSeconds = fileListingMinIntervalSeconds;
+        this.readOnlyAvroRawdataUtils = readOnlyAvroRawdataUtils;
+        this.readWriteAvroRawdataUtils = readWriteAvroRawdataUtils;
     }
 
     @Override
@@ -99,7 +60,7 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataProducer producer = new GCSRawdataProducer(getWritableStorage(), bucket, tmpFileFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, topic);
+        AvroRawdataProducer producer = new AvroRawdataProducer(readWriteAvroRawdataUtils, tmpFileFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, topic);
         producers.add(producer);
         return producer;
     }
@@ -109,14 +70,14 @@ class GCSRawdataClient implements RawdataClient {
         if (closed.get()) {
             throw new RawdataClosedException();
         }
-        GCSRawdataConsumer consumer = new GCSRawdataConsumer(getReadOnlyStorage(), bucket, topic, (GCSCursor) cursor, gcsFileListingMaxIntervalSeconds);
+        AvroRawdataConsumer consumer = new AvroRawdataConsumer(readOnlyAvroRawdataUtils, topic, (AvroRawdataCursor) cursor, fileListingMinIntervalSeconds);
         consumers.add(consumer);
         return consumer;
     }
 
     @Override
     public RawdataCursor cursorOf(String topic, ULID.Value ulid, boolean inclusive) {
-        return new GCSCursor(ulid, inclusive);
+        return new AvroRawdataCursor(ulid, inclusive);
     }
 
     @Override
@@ -127,9 +88,9 @@ class GCSRawdataClient implements RawdataClient {
     private ULID.Value ulidOfPosition(String topic, String position, long approxTimestamp, Duration tolerance) throws RawdataNoSuchPositionException {
         ULID.Value lowerBoundUlid = RawdataConsumer.beginningOf(approxTimestamp - tolerance.toMillis());
         ULID.Value upperBoundUlid = RawdataConsumer.beginningOf(approxTimestamp + tolerance.toMillis());
-        try (GCSRawdataConsumer consumer = new GCSRawdataConsumer(getReadOnlyStorage(), bucket, topic, new GCSCursor(lowerBoundUlid, true), gcsFileListingMaxIntervalSeconds)) {
+        try (AvroRawdataConsumer consumer = new AvroRawdataConsumer(readOnlyAvroRawdataUtils, topic, new AvroRawdataCursor(lowerBoundUlid, true), fileListingMinIntervalSeconds)) {
             RawdataMessage message;
-            while ((message = consumer.receive(2, TimeUnit.SECONDS)) != null) {
+            while ((message = consumer.receive(0, TimeUnit.SECONDS)) != null) {
                 if (message.timestamp() > upperBoundUlid.timestamp()) {
                     throw new RawdataNoSuchPositionException(
                             String.format("Unable to find position, reached upper-bound. Time-range=[%s,%s), position=%s",
@@ -161,22 +122,22 @@ class GCSRawdataClient implements RawdataClient {
 
     @Override
     public RawdataMessage lastMessage(String topic) throws RawdataClosedException {
-        NavigableMap<Long, Blob> topicBlobs = new GCSRawdataUtils(getReadOnlyStorage()).getTopicBlobs(bucket, topic);
+        NavigableMap<Long, RawdataAvroFile> topicBlobs = readOnlyAvroRawdataUtils.getTopicBlobs(topic);
         if (topicBlobs.isEmpty()) {
             return null;
         }
-        Blob blob = topicBlobs.lastEntry().getValue();
-        LOG.debug("Reading last message from GCS Blob: {}", blob.getBlobId());
-        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(GCSRawdataProducer.schema);
+        RawdataAvroFile rawdataAvroFile = topicBlobs.lastEntry().getValue();
+        LOG.debug("Reading last message from RawdataAvroFile: {}", rawdataAvroFile);
+        DatumReader<GenericRecord> datumReader = new GenericDatumReader<>(AvroRawdataProducer.schema);
         DataFileReader<GenericRecord> dataFileReader;
         try {
-            dataFileReader = new DataFileReader<>(new GCSSeekableInput(blob.reader(), blob.getSize()), datumReader);
-            dataFileReader.seek(GCSRawdataUtils.getOffsetOfLastBlock(blob.getBlobId()));
+            dataFileReader = new DataFileReader<>(rawdataAvroFile.seekableInput(), datumReader);
+            dataFileReader.seek(rawdataAvroFile.getOffsetOfLastBlock());
             GenericRecord record = null;
             while (dataFileReader.hasNext()) {
                 record = dataFileReader.next(record);
             }
-            return record == null ? null : GCSRawdataConsumer.toRawdataMessage(record);
+            return record == null ? null : AvroRawdataConsumer.toRawdataMessage(record);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -190,11 +151,11 @@ class GCSRawdataClient implements RawdataClient {
     @Override
     public void close() throws Exception {
         if (closed.compareAndSet(false, true)) {
-            for (GCSRawdataProducer producer : producers) {
+            for (AvroRawdataProducer producer : producers) {
                 producer.close();
             }
             producers.clear();
-            for (GCSRawdataConsumer consumer : consumers) {
+            for (AvroRawdataConsumer consumer : consumers) {
                 consumer.close();
             }
             consumers.clear();

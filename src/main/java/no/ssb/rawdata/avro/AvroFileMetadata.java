@@ -1,12 +1,11 @@
-package no.ssb.rawdata.gcs;
+package no.ssb.rawdata.avro;
 
-import com.google.cloud.storage.BlobId;
 import de.huxhorn.sulky.ulid.ULID;
 
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-public class GCSAvroFileMetadata {
+public abstract class AvroFileMetadata {
     final AtomicReference<ULID.Value> idOfFirstRecord = new AtomicReference<>();
     final AtomicReference<String> positionOfFirstRecord = new AtomicReference<>();
     final AtomicLong count = new AtomicLong(0);
@@ -51,12 +50,10 @@ public class GCSAvroFileMetadata {
         return idOfFirstRecord.get();
     }
 
-    String toFilename() {
-        String fromTime = GCSRawdataUtils.formatTimestamp(getIdOfFirstRecord().timestamp());
+    public String toFilename() {
+        String fromTime = AvroRawdataUtils.formatTimestamp(getIdOfFirstRecord().timestamp());
         return fromTime + "_" + getCount() + "_" + getSyncOfLastBlock() + "_" + getPositionOfFirstRecord() + ".avro";
     }
 
-    BlobId toBlobId(String bucket, String topic) {
-        return BlobId.of(bucket, topic + "/" + toFilename());
-    }
+    public abstract RawdataAvroFile toRawdataAvroFile(String topic);
 }
