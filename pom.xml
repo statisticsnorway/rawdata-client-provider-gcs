@@ -4,7 +4,7 @@
 
     <groupId>no.ssb.rawdata</groupId>
     <artifactId>rawdata-client-provider-gcs</artifactId>
-    <version>0.8-SNAPSHOT</version>
+    <version>0.8</version>
     <packaging>jar</packaging>
 
     <name>GCS Rawdata Provider</name>
@@ -39,7 +39,7 @@
         <developerConnection>scm:git:git@github.com:statisticsnorway/rawdata-client-provider-gcs.git
         </developerConnection>
         <url>https://github.com/statisticsnorway/rawdata-client-provider-gcs/tree/master</url>
-        <tag>HEAD</tag>
+        <tag>rawdata-client-provider-gcs-0.8</tag>
     </scm>
 
     <distributionManagement>
