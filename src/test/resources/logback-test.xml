@@ -9,7 +9,6 @@
         </encoder>
     </appender>
 
-    <logger name="no.ssb.rawdata.lmdb" level="INFO"/>
     <logger name="no.ssb.rawdata.gcs" level="INFO"/>
 
     <root level="INFO">

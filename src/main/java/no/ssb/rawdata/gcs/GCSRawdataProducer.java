@@ -26,8 +26,10 @@ import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Map;
+import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
@@ -66,6 +68,7 @@ class GCSRawdataProducer implements RawdataProducer {
     final Map<String, GCSRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
 
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
+    final Path topicFolder;
     final AtomicReference<Path> pathRef = new AtomicReference<>();
 
     final AtomicLong timestampOfFirstMessageInWindow = new AtomicLong(-1);
@@ -73,6 +76,19 @@ class GCSRawdataProducer implements RawdataProducer {
     final AtomicLong avroBytesWrittenInBlock = new AtomicLong(0);
 
     final ReentrantLock lock = new ReentrantLock();
+
+    final Thread uploadThread;
+    final BlockingQueue<Upload> uploadQueue = new LinkedBlockingQueue<>();
+
+    static class Upload {
+        final Path path;
+        final BlobId blobId;
+
+        Upload(Path path, BlobId blobId) {
+            this.path = path;
+            this.blobId = blobId;
+        }
+    }
 
     GCSRawdataProducer(Storage storage, String bucket, Path tmpFolder, long avroMaxSeconds, long avroMaxBytes, int avroSyncInterval, String topic) {
         this.gcsRawdataUtils = new GCSRawdataUtils(storage);
@@ -82,18 +98,48 @@ class GCSRawdataProducer implements RawdataProducer {
         this.avroMaxBytes = avroMaxBytes;
         this.avroSyncInterval = avroSyncInterval;
         this.topic = topic;
+        this.topicFolder = tmpFolder.resolve(topic);
         try {
-            Path topicFolder = tmpFolder.resolve(topic);
             Files.createDirectories(topicFolder);
-            Path path = Files.createTempFile(topicFolder, "", ".avro");
-            pathRef.set(path);
-            createOrOverwriteLocalAvroFile(path);
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
+        createOrOverwriteLocalAvroFile();
+        this.uploadThread = new Thread(() -> {
+            for (; ; ) {
+                final Upload upload;
+                try {
+                    upload = uploadQueue.take(); // wait for upload task
+                } catch (InterruptedException e) {
+                    LOG.warn("Closing producer topic {}", topic);
+                    close();
+                    LOG.warn("Upload thread interrupted. Upload thread for producer of topic {} will now die.", topic);
+                    return;
+                }
+                try {
+                    if (upload.path == null) {
+                        LOG.info("Upload thread for producer of topic {} received close signal and will now die.", topic);
+                        return;
+                    }
+                    verifySeekableToLastBlockOffsetAsGivenByFilename(upload.path, GCSRawdataUtils.getOffsetOfLastBlock(upload.blobId));
+                    String fileSize = GCSRawdataUtils.humanReadableByteCount(upload.path.toFile().length(), false);
+                    LOG.info("Copying Avro file {} ({}) to BlobId: {}", upload.path.getFileName(), fileSize, upload.blobId);
+                    gcsRawdataUtils.copyLocalFileToGCSBlob(upload.path.toFile(), upload.blobId);
+                    Files.delete(upload.path);
+                    LOG.info("Copy COMPLETE! Deleted Avro file {}", upload.path.getFileName());
+                } catch (Throwable t) {
+                    LOG.error(String.format("While uploading file %s to blobId %s", upload.path.getFileName(), upload.blobId), t);
+                    LOG.warn("Closing producer topic {}", topic);
+                    close();
+                    LOG.warn("Upload thread for producer of topic {} will now die.", topic);
+                    return;
+                }
+            }
+        });
+        this.uploadThread.start();
     }
 
-    private void createOrOverwriteLocalAvroFile(Path path) {
+    private void createOrOverwriteLocalAvroFile() {
         try {
             if (!lock.tryLock(5, TimeUnit.MINUTES)) {
                 throw new IllegalStateException("Unable to acquire lock within 5 minutes");
@@ -102,25 +148,25 @@ class GCSRawdataProducer implements RawdataProducer {
             throw new RuntimeException(e);
         }
         try {
+            Path path = Files.createTempFile(topicFolder, "", ".avro");
+            pathRef.set(path);
             activeAvrofileMetadata.clear();
             DatumWriter<GenericRecord> datumWriter = new GenericDatumWriter<>(schema);
             DataFileWriter<GenericRecord> dataFileWriter = new DataFileWriter<>(datumWriter);
             dataFileWriter.setSyncInterval(2 * avroSyncInterval);
             dataFileWriter.setFlushOnEveryBlock(true);
             dataFileWriterRef.set(dataFileWriter);
-            try {
-                dataFileWriter.create(schema, path.toFile());
-                long lastSyncPosition = dataFileWriter.sync(); // position of first block
-                activeAvrofileMetadata.setSyncOfLastBlock(lastSyncPosition);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            dataFileWriter.create(schema, path.toFile());
+            long lastSyncPosition = dataFileWriter.sync(); // position of first block
+            activeAvrofileMetadata.setSyncOfLastBlock(lastSyncPosition);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
         } finally {
             lock.unlock();
         }
     }
 
-    private void closeAvroFileAndUploadToGCS() {
+    private void closeAvroFileAndTriggerAsyncUploadToGCS() {
         try {
             if (!lock.tryLock(5, TimeUnit.MINUTES)) {
                 throw new IllegalStateException("Unable to acquire lock within 5 minutes");
@@ -138,11 +184,7 @@ class GCSRawdataProducer implements RawdataProducer {
             if (path != null) {
                 if (activeAvrofileMetadata.getCount() > 0) {
                     BlobId blobId = activeAvrofileMetadata.toBlobId(bucket, topic);
-                    verifySeekableToLastBlockOffsetAsGivenByFilename(path, GCSRawdataUtils.getOffsetOfLastBlock(blobId));
-                    String fileSize = GCSRawdataUtils.humanReadableByteCount(path.toFile().length(), false);
-                    LOG.info("Copying Avro file {} ({}) to BlobId: {}", path.getFileName(), fileSize, blobId);
-                    gcsRawdataUtils.copyLocalFileToGCSBlob(path.toFile(), blobId);
-                    LOG.info("Copy COMPLETE! Avro file {}", path.getFileName());
+                    uploadQueue.add(new Upload(path, blobId)); // schedule upload asynchronously
                 } else {
                     // no records, no need to write file to GCS
                 }
@@ -201,8 +243,8 @@ class GCSRawdataProducer implements RawdataProducer {
 
                 boolean timeLimitExceeded = timestampOfFirstMessageInWindow.get() + 1000 * avroMaxSeconds < now;
                 if (timeLimitExceeded) {
-                    closeAvroFileAndUploadToGCS();
-                    createOrOverwriteLocalAvroFile(pathRef.get());
+                    closeAvroFileAndTriggerAsyncUploadToGCS();
+                    createOrOverwriteLocalAvroFile();
                     timestampOfFirstMessageInWindow.set(now);
                 }
 
@@ -243,8 +285,8 @@ class GCSRawdataProducer implements RawdataProducer {
 
                 boolean sizeLimitExceeded = pathRef.get().toFile().length() > avroMaxBytes;
                 if (sizeLimitExceeded) {
-                    closeAvroFileAndUploadToGCS();
-                    createOrOverwriteLocalAvroFile(pathRef.get());
+                    closeAvroFileAndTriggerAsyncUploadToGCS();
+                    createOrOverwriteLocalAvroFile();
                 }
             }
         } finally {
@@ -278,8 +320,15 @@ class GCSRawdataProducer implements RawdataProducer {
     @Override
     public void close() {
         if (closed.compareAndSet(false, true)) {
-            closeAvroFileAndUploadToGCS();
+            closeAvroFileAndTriggerAsyncUploadToGCS();
+            uploadQueue.add(new Upload(null, null)); // send close signal to upload-thread.
             buffer.clear();
+        }
+        try {
+            // all callers must wait for all uploads to complete
+            uploadThread.join();
+        } catch (InterruptedException e) {
+            throw new RuntimeException(e);
         }
     }
 }
