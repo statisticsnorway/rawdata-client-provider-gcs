@@ -38,7 +38,7 @@ import static org.testng.Assert.assertNull;
  * Requirements: A google cloud service-account key with access to read and write objects in cloud-storage.
  * This can be put as a file at the path "secret/gcs_sa_test.json"
  */
-public class AvroRawdataClientIntegrationTest {
+public class GCSRawdataClientIntegrationTest {
 
     RawdataClient client;
 

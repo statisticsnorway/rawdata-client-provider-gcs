@@ -37,8 +37,10 @@ created on GCS while tailing the stream.
 | gcs.bucket-name | test-bucket | yes | Name of bucket |
 | gcs.listing.min-interval-seconds | 60 | yes | Minimum number-of seconds between GCS list operations |
 | gcs.service-account.key-file | secret/my_gcs_sa.json | yes | Path to json service-account key file |
+| listing.min-interval-seconds | 0 | yes | Minimum number-of seconds between filesystem list operations |
+| filesystem.storage-folder | rawdata/storage | yes | Path to rawdata storage folder |
 
-## Example usage
+## Example usage of gcs provider
 ```java
     Map<String, String> configuration = Map.of(
             "local-temp-folder", "temp",
@@ -52,6 +54,21 @@ created on GCS while tailing the stream.
 
     RawdataClient client = ProviderConfigurator.configure(configuration,
             "gcs", RawdataClientInitializer.class);
+```
+
+## Example usage of filesystem provider
+```java
+    Map<String, String> configuration = Map.of(
+            "local-temp-folder", "temp",
+            "avro-file.max.seconds", "3600",
+            "avro-file.max.bytes", "10485760",
+            "avro-file.sync.interval", "524288",
+            "listing.min-interval-seconds", "0",
+            "filesystem.storage-folder", "rawdata/storage"
+    );
+
+    RawdataClient client = ProviderConfigurator.configure(configuration,
+            "filesystem", RawdataClientInitializer.class);
 ```
 
 For the full example, see the ExampleApp.java file in the src/test/java
