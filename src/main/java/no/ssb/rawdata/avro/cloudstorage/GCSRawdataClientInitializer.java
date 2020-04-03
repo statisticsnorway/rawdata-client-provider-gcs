@@ -1,5 +1,6 @@
 package no.ssb.rawdata.avro.cloudstorage;
 
+import com.google.auth.oauth2.ComputeEngineCredentials;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.Storage;
@@ -35,6 +36,7 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
                 "avro-file.sync.interval",
                 "gcs.bucket-name",
                 "gcs.listing.min-interval-seconds",
+                "gcs.credential-provider",
                 "gcs.service-account.key-file"
         );
     }
@@ -48,30 +50,33 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         int avroSyncInterval = Integer.parseInt(configuration.get("avro-file.sync.interval"));
         int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.min-interval-seconds"));
         Path serviceAccountKeyPath = Path.of(configuration.get("gcs.service-account.key-file"));
-        AvroRawdataUtils readOnlyGcsRawdataUtils = new GCSRawdataUtils(getReadOnlyStorage(serviceAccountKeyPath), bucket);
-        AvroRawdataUtils readWriteGcsRawdataUtils = new GCSRawdataUtils(getWritableStorage(serviceAccountKeyPath), bucket);
+        String credentialProvider = configuration.getOrDefault("gcs.credential-provider", "service-account");
+
+        GoogleCredentials credentials;
+        if ("service-account".equalsIgnoreCase(credentialProvider)) {
+            try {
+                credentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+        } else if ("compute-engine".equalsIgnoreCase(credentialProvider)) {
+            credentials = ComputeEngineCredentials.create();
+        } else {
+            throw new IllegalArgumentException("'gcs.credential-provider' must be one of 'service-account' or 'compute-engine'");
+        }
+
+        AvroRawdataUtils readOnlyGcsRawdataUtils = new GCSRawdataUtils(getReadOnlyStorage(credentials), bucket);
+        AvroRawdataUtils readWriteGcsRawdataUtils = new GCSRawdataUtils(getWritableStorage(credentials), bucket);
         return new AvroRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, gcsFileListingMaxIntervalSeconds, readOnlyGcsRawdataUtils, readWriteGcsRawdataUtils);
     }
 
-    static Storage getWritableStorage(Path serviceAccountKeyPath) {
-        ServiceAccountCredentials sourceCredentials;
-        try {
-            sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    static Storage getWritableStorage(GoogleCredentials sourceCredentials) {
         GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_write"));
         Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
         return storage;
     }
 
-    static Storage getReadOnlyStorage(Path serviceAccountKeyPath) {
-        ServiceAccountCredentials sourceCredentials;
-        try {
-            sourceCredentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
+    static Storage getReadOnlyStorage(GoogleCredentials sourceCredentials) {
         GoogleCredentials scopedCredentials = sourceCredentials.createScoped(Arrays.asList("https://www.googleapis.com/auth/devstorage.read_only"));
         Storage storage = StorageOptions.newBuilder().setCredentials(scopedCredentials).build().getService();
         return storage;
