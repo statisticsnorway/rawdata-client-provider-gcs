@@ -83,7 +83,7 @@ class FilesystemRawdataUtils implements AvroRawdataUtils {
             if (!topicFolder.toFile().isDirectory()) {
                 return map;
             }
-            Files.list(topicFolder).filter(path -> path.toFile().isFile()).forEach(path -> {
+            Files.list(topicFolder).filter(path -> path.toFile().isFile() && path.toFile().length() > 0).forEach(path -> {
                 long fromTimestamp = getFromTimestamp(path);
                 map.put(fromTimestamp, new FilesystemRawdataAvroFile(path));
             });
