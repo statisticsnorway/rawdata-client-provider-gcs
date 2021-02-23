@@ -1,6 +1,5 @@
 package no.ssb.rawdata.avro.filesystem;
 
-import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.avro.AvroRawdataClient;
 import no.ssb.rawdata.avro.AvroRawdataUtils;
@@ -31,7 +30,7 @@ public class FilesystemAvroRawdataClientInitializer implements RawdataClientInit
     }
 
     @Override
-    public RawdataClient initialize(Map<String, String> configuration) {
+    public AvroRawdataClient initialize(Map<String, String> configuration) {
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long avroMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
         long avroMaxBytes = Long.parseLong(configuration.get("avro-file.max.bytes"));

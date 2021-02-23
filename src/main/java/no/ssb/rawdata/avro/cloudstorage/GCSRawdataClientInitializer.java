@@ -5,7 +5,6 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
-import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.avro.AvroRawdataClient;
 import no.ssb.rawdata.avro.AvroRawdataUtils;
@@ -42,7 +41,7 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
     }
 
     @Override
-    public RawdataClient initialize(Map<String, String> configuration) {
+    public AvroRawdataClient initialize(Map<String, String> configuration) {
         String bucket = configuration.get("gcs.bucket-name");
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long avroMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
