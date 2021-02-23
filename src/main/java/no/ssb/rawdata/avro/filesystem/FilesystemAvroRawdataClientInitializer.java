@@ -1,7 +1,6 @@
 package no.ssb.rawdata.avro.filesystem;
 
 import no.ssb.rawdata.api.RawdataClientInitializer;
-import no.ssb.rawdata.avro.AvroRawdataClient;
 import no.ssb.rawdata.avro.AvroRawdataUtils;
 import no.ssb.service.provider.api.ProviderName;
 
@@ -30,7 +29,7 @@ public class FilesystemAvroRawdataClientInitializer implements RawdataClientInit
     }
 
     @Override
-    public AvroRawdataClient initialize(Map<String, String> configuration) {
+    public FilesystemRawdataClient initialize(Map<String, String> configuration) {
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long avroMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
         long avroMaxBytes = Long.parseLong(configuration.get("avro-file.max.bytes"));
@@ -39,6 +38,6 @@ public class FilesystemAvroRawdataClientInitializer implements RawdataClientInit
         Path storageFolder = Path.of(configuration.get("filesystem.storage-folder"));
         AvroRawdataUtils readOnlyFilesystemRawdataUtils = new FilesystemRawdataUtils(storageFolder);
         AvroRawdataUtils readWriteFilesystemRawdataUtils = new FilesystemRawdataUtils(storageFolder);
-        return new AvroRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, minListingIntervalSeconds, readOnlyFilesystemRawdataUtils, readWriteFilesystemRawdataUtils);
+        return new FilesystemRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, minListingIntervalSeconds, readOnlyFilesystemRawdataUtils, readWriteFilesystemRawdataUtils, storageFolder);
     }
 }

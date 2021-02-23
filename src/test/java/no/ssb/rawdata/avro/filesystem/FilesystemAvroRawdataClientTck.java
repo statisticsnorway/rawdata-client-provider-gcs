@@ -5,6 +5,7 @@ import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataMetadataClient;
 import no.ssb.rawdata.api.RawdataNoSuchPositionException;
 import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
@@ -636,5 +637,26 @@ public class FilesystemAvroRawdataClientTck {
 
         RawdataMessage lastMessage = client.lastMessage("the-topic");
         assertEquals(lastMessage.position(), "a");
+    }
+
+    @Test
+    public void thatMetadataCanBeWrittenListedAndRead() {
+        RawdataMetadataClient metadata = client.metadata("the-topic");
+        assertEquals(metadata.topic(), "the-topic");
+        assertEquals(metadata.keys().size(), 0);
+        String key1 = "//./key-1'§!#$%&/()=?";
+        String key2 = ".";
+        String key3 = "..";
+        metadata.put(key1, "Value-1".getBytes(StandardCharsets.UTF_8));
+        metadata.put(key2, "Value-2".getBytes(StandardCharsets.UTF_8));
+        metadata.put(key3, "Value-3".getBytes(StandardCharsets.UTF_8));
+        assertEquals(metadata.keys().size(), 3);
+        assertEquals(new String(metadata.get(key1), StandardCharsets.UTF_8), "Value-1");
+        assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Value-2");
+        metadata.put(key2, "Overwritten-Value-2".getBytes(StandardCharsets.UTF_8));
+        assertEquals(metadata.keys().size(), 3);
+        assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Overwritten-Value-2");
+        metadata.remove(key3);
+        assertEquals(metadata.keys().size(), 2);
     }
 }

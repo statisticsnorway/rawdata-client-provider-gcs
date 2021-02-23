@@ -28,7 +28,7 @@ import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class AvroRawdataClient implements RawdataClient {
+public abstract class AvroRawdataClient implements RawdataClient {
 
     static final Logger LOG = LoggerFactory.getLogger(AvroRawdataClient.class);
 

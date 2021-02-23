@@ -10,6 +10,7 @@ import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
 import no.ssb.rawdata.api.RawdataConsumer;
 import no.ssb.rawdata.api.RawdataMessage;
+import no.ssb.rawdata.api.RawdataMetadataClient;
 import no.ssb.rawdata.api.RawdataProducer;
 import no.ssb.service.provider.api.ProviderConfigurator;
 import org.testng.annotations.AfterMethod;
@@ -19,6 +20,7 @@ import org.testng.annotations.Test;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -48,14 +50,14 @@ public class GCSRawdataClientIntegrationTest {
     @BeforeMethod
     public void createRawdataClient() throws IOException {
         Map<String, String> configuration = new LinkedHashMap<>();
-        configuration.put("gcs.bucket-name", "bip-drone-dependency-cache");
+        configuration.put("gcs.bucket-name", "test-gcs-provider");
         configuration.put("local-temp-folder", "target/_tmp_avro_");
         configuration.put("avro-file.max.seconds", "3");
         configuration.put("avro-file.max.bytes", Long.toString(2 * 1024)); // 2 KiB
         configuration.put("avro-file.sync.interval", Long.toString(200));
         configuration.put("gcs.listing.min-interval-seconds", "3");
         configuration.put("gcs.credential-provider", "service-account");
-        configuration.put("gcs.service-account.key-file", "secret/gcs_sa_test.json");
+        configuration.put("gcs.service-account.key-file", "secret/dev-sirius-e9f1008a4f11.json");
 
         String rawdataGcsBucket = System.getenv("RAWDATA_GCS_BUCKET");
         if (rawdataGcsBucket != null) {
@@ -149,5 +151,28 @@ public class GCSRawdataClientIntegrationTest {
             consumer.seek(timestampBeforeA);
             assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "a");
         }
+    }
+
+    @Ignore
+    @Test
+    public void thatMetadataCanBeWrittenListedAndRead() {
+        RawdataMetadataClient metadata = client.metadata("the-topic");
+        assertEquals(metadata.topic(), "the-topic");
+        assertEquals(metadata.keys().size(), 0);
+        String key1 = "//./key-1'§!#$%&/()=?";
+        String key2 = ".";
+        String key3 = "..";
+        metadata.put(key1, "Value-1".getBytes(StandardCharsets.UTF_8));
+        metadata.put(key2, "Value-2".getBytes(StandardCharsets.UTF_8));
+        metadata.put(key3, "Value-3".getBytes(StandardCharsets.UTF_8));
+        assertEquals(metadata.keys().size(), 3);
+        assertEquals(new String(metadata.get(key1), StandardCharsets.UTF_8), "Value-1");
+        assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Value-2");
+        assertEquals(new String(metadata.get(key3), StandardCharsets.UTF_8), "Value-3");
+        metadata.put(key2, "Overwritten-Value-2".getBytes(StandardCharsets.UTF_8));
+        assertEquals(metadata.keys().size(), 3);
+        assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Overwritten-Value-2");
+        metadata.remove(key3);
+        assertEquals(metadata.keys().size(), 2);
     }
 }

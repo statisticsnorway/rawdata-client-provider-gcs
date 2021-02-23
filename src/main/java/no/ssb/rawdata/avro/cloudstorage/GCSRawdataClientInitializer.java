@@ -6,7 +6,6 @@ import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.storage.Storage;
 import com.google.cloud.storage.StorageOptions;
 import no.ssb.rawdata.api.RawdataClientInitializer;
-import no.ssb.rawdata.avro.AvroRawdataClient;
 import no.ssb.rawdata.avro.AvroRawdataUtils;
 import no.ssb.service.provider.api.ProviderName;
 
@@ -41,7 +40,7 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
     }
 
     @Override
-    public AvroRawdataClient initialize(Map<String, String> configuration) {
+    public GCSRawdataClient initialize(Map<String, String> configuration) {
         String bucket = configuration.get("gcs.bucket-name");
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long avroMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
@@ -65,8 +64,9 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         }
 
         AvroRawdataUtils readOnlyGcsRawdataUtils = new GCSRawdataUtils(getReadOnlyStorage(credentials), bucket);
-        AvroRawdataUtils readWriteGcsRawdataUtils = new GCSRawdataUtils(getWritableStorage(credentials), bucket);
-        return new AvroRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, gcsFileListingMaxIntervalSeconds, readOnlyGcsRawdataUtils, readWriteGcsRawdataUtils);
+        Storage writableStorage = getWritableStorage(credentials);
+        AvroRawdataUtils readWriteGcsRawdataUtils = new GCSRawdataUtils(writableStorage, bucket);
+        return new GCSRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, gcsFileListingMaxIntervalSeconds, readOnlyGcsRawdataUtils, readWriteGcsRawdataUtils, writableStorage, bucket);
     }
 
     static Storage getWritableStorage(GoogleCredentials sourceCredentials) {
