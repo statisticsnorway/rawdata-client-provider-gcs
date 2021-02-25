@@ -16,7 +16,7 @@ resources:
   - repository: templates
     type: github
     name: statisticsnorway/azure-pipelines-templates
-    ref: dc2404e84ee65f694d43c6118f4a3006752c3ddd
+    ref: refs/tags/1.1.16
     endpoint: statisticsnorway (6)
 
 # Pipeline will be run on this base image
@@ -30,8 +30,10 @@ variables:
   # Azure Pipelines
   - group: Hemmeligheter
   # Variables defined here
+  - name:  MAVEN_CACHE_FOLDER
+    value: $(Pipeline.Workspace)/.m2/repository
   - name: MAVEN_OPTS
-    value: ''
+    value: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
 
 
 jobs:
