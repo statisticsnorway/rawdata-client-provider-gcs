@@ -10,14 +10,14 @@ trigger:
 
 resources:
   containers:
-  - container: 'ubuntu_container_for_build_deply_to_nexus'
-    image: 'ubuntu:latest'
+    - container: 'ubuntu_container_for_build_deply_to_nexus'
+      image: 'ubuntu:latest'
   repositories:
-  - repository: templates
-    type: github
-    name: statisticsnorway/azure-pipelines-templates
-    ref: refs/tags/1.1.16
-    endpoint: statisticsnorway (6)
+    - repository: templates
+      type: github
+      name: statisticsnorway/azure-pipelines-templates
+      ref: refs/tags/1.1.16
+      endpoint: statisticsnorway (6)
 
 # Pipeline will be run on this base image
 pool:
@@ -30,7 +30,7 @@ variables:
   # Azure Pipelines
   - group: Hemmeligheter
   # Variables defined here
-  - name:  MAVEN_CACHE_FOLDER
+  - name: MAVEN_CACHE_FOLDER
     value: $(Pipeline.Workspace)/.m2/repository
   - name: MAVEN_OPTS
     value: '-Dmaven.repo.local=$(MAVEN_CACHE_FOLDER)'
