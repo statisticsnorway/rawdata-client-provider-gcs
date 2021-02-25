@@ -40,6 +40,4 @@ jobs:
   - template: complete-builds/job-test-nexus.yml@templates
     parameters:
       project: dapla
-      imageName: $(imageName)
-      repoName: $(repoName)
       checkStyleRunAnalysis: false
