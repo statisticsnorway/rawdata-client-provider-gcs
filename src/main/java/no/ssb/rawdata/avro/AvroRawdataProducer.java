@@ -62,7 +62,7 @@ class AvroRawdataProducer implements RawdataProducer {
     final int avroSyncInterval;
     final String topic;
 
-    final Map<String, AvroRawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
+    final Map<String, RawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
 
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
     final Path topicFolder;
@@ -209,16 +209,15 @@ class AvroRawdataProducer implements RawdataProducer {
 
     @Override
     public RawdataMessage.Builder builder() throws RawdataClosedException {
-        return new AvroRawdataMessage.Builder();
+        return RawdataMessage.builder();
     }
 
     @Override
-    public RawdataProducer buffer(RawdataMessage.Builder _builder) throws RawdataClosedException {
-        AvroRawdataMessage.Builder builder = (AvroRawdataMessage.Builder) _builder;
+    public RawdataProducer buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
         if (isClosed()) {
             throw new RawdataClosedException();
         }
-        buffer.put(builder.position, builder);
+        buffer.put(builder.position(), builder);
         return this;
     }
 
@@ -246,15 +245,15 @@ class AvroRawdataProducer implements RawdataProducer {
                     timestampOfFirstMessageInWindow.set(now);
                 }
 
-                AvroRawdataMessage.Builder builder = buffer.remove(position);
+                RawdataMessage.Builder builder = buffer.remove(position);
                 if (builder == null) {
                     throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
                 }
-                if (builder.ulid == null) {
+                if (builder.ulid() == null) {
                     ULID.Value value = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
                     builder.ulid(value);
                 }
-                AvroRawdataMessage message = builder.build();
+                RawdataMessage message = builder.build();
                 prevUlid.set(message.ulid());
 
                 activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
@@ -292,7 +291,7 @@ class AvroRawdataProducer implements RawdataProducer {
         }
     }
 
-    static long estimateAvroSizeOfRawdataMessage(AvroRawdataMessage message) {
+    static long estimateAvroSizeOfRawdataMessage(RawdataMessage message) {
         return 16 + // ulid
                 2 + ofNullable(message.orderingGroup()).map(String::length).orElse(0) + // orderingGroup
                 6 + // sequenceNumber
