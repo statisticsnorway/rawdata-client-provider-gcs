@@ -32,7 +32,7 @@ class AvroRawdataConsumer implements RawdataConsumer {
     final AtomicReference<Long> activeBlobFromKeyRef = new AtomicReference<>(-1L);
     final AtomicReference<DataFileReader<GenericRecord>> activeBlobDataFileReaderRef = new AtomicReference<>(null);
     final AtomicBoolean closed = new AtomicBoolean(false);
-    final Deque<AvroRawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
+    final Deque<RawdataMessage> preloadedMessages = new ConcurrentLinkedDeque<>();
 
     AvroRawdataConsumer(AvroRawdataUtils gcsRawdataUtils, String topic, AvroRawdataCursor cursor, int minFileListingIntervalSeconds) {
         this.topic = topic;
@@ -42,8 +42,8 @@ class AvroRawdataConsumer implements RawdataConsumer {
         } else {
             seek(cursor.ulid.timestamp());
             try {
-                AvroRawdataMessage msg;
-                while ((msg = (AvroRawdataMessage) receive(0, TimeUnit.SECONDS)) != null) {
+                RawdataMessage msg;
+                while ((msg = receive(0, TimeUnit.SECONDS)) != null) {
                     if (msg.ulid().equals(cursor.ulid)) {
                         if (cursor.inclusive) {
                             preloadedMessages.addFirst(msg);
@@ -70,7 +70,7 @@ class AvroRawdataConsumer implements RawdataConsumer {
     @Override
     public RawdataMessage receive(int timeout, TimeUnit unit) throws InterruptedException, RawdataClosedException {
         final long start = System.currentTimeMillis();
-        AvroRawdataMessage preloadedMessage = preloadedMessages.poll();
+        RawdataMessage preloadedMessage = preloadedMessages.poll();
         if (preloadedMessage != null) {
             return preloadedMessage;
         }
@@ -90,7 +90,7 @@ class AvroRawdataConsumer implements RawdataConsumer {
             return receive(timeout, unit);
         }
         GenericRecord record = dataFileReader.next();
-        AvroRawdataMessage msg = toRawdataMessage(record);
+        RawdataMessage msg = toRawdataMessage(record);
         return msg;
     }
 
@@ -110,7 +110,7 @@ class AvroRawdataConsumer implements RawdataConsumer {
         return nextEntry;
     }
 
-    static AvroRawdataMessage toRawdataMessage(GenericRecord record) {
+    static RawdataMessage toRawdataMessage(GenericRecord record) {
         GenericData.Fixed id = (GenericData.Fixed) record.get("id");
         ULID.Value ulid = ULID.fromBytes(id.bytes());
         String orderingGroup = ofNullable(record.get("orderingGroup")).map(Object::toString).orElse(null);
@@ -119,7 +119,13 @@ class AvroRawdataConsumer implements RawdataConsumer {
         Map<Utf8, ByteBuffer> data = (Map<Utf8, ByteBuffer>) record.get("data");
         Map<String, byte[]> map = data.entrySet().stream().collect(Collectors.toMap(e -> e.getKey().toString(), e -> e.getValue().array()));
 
-        return new AvroRawdataMessage(ulid, orderingGroup, sequenceNumber, position, map);
+        return RawdataMessage.builder()
+                .ulid(ulid)
+                .orderingGroup(orderingGroup)
+                .sequenceNumber(sequenceNumber)
+                .position(position)
+                .data(map)
+                .build();
     }
 
     @Override
@@ -160,7 +166,7 @@ class AvroRawdataConsumer implements RawdataConsumer {
         while (dataFileReader.hasNext()) {
             try {
                 record = dataFileReader.next(record);
-                AvroRawdataMessage message = toRawdataMessage(record);
+                RawdataMessage message = toRawdataMessage(record);
                 long msgTimestamp = message.timestamp();
                 if (msgTimestamp >= timestamp) {
                     preloadedMessages.add(message);

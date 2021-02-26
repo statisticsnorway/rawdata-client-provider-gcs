@@ -1,17 +1,12 @@
 package no.ssb.rawdata.avro.filesystem;
 
-import com.google.cloud.storage.Storage;
-import no.ssb.rawdata.api.RawdataClient;
 import no.ssb.rawdata.api.RawdataClientInitializer;
-import no.ssb.rawdata.avro.AvroRawdataClient;
 import no.ssb.rawdata.avro.AvroRawdataUtils;
 import no.ssb.service.provider.api.ProviderName;
 
 import java.nio.file.Path;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
 
 @ProviderName("filesystem")
 public class FilesystemAvroRawdataClientInitializer implements RawdataClientInitializer {
@@ -34,17 +29,15 @@ public class FilesystemAvroRawdataClientInitializer implements RawdataClientInit
     }
 
     @Override
-    public RawdataClient initialize(Map<String, String> configuration) {
+    public FilesystemRawdataClient initialize(Map<String, String> configuration) {
         Path localTempFolder = Path.of(configuration.get("local-temp-folder"));
         long avroMaxSeconds = Long.parseLong(configuration.get("avro-file.max.seconds"));
         long avroMaxBytes = Long.parseLong(configuration.get("avro-file.max.bytes"));
         int avroSyncInterval = Integer.parseInt(configuration.get("avro-file.sync.interval"));
         int minListingIntervalSeconds = Integer.parseInt(configuration.get("listing.min-interval-seconds"));
         Path storageFolder = Path.of(configuration.get("filesystem.storage-folder"));
-        AvroRawdataUtils readOnlyGcsRawdataUtils = new FilesystemRawdataUtils(storageFolder);
-        AvroRawdataUtils readWriteGcsRawdataUtils = new FilesystemRawdataUtils(storageFolder);
-        return new AvroRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, minListingIntervalSeconds, readOnlyGcsRawdataUtils, readWriteGcsRawdataUtils);
+        AvroRawdataUtils readOnlyFilesystemRawdataUtils = new FilesystemRawdataUtils(storageFolder);
+        AvroRawdataUtils readWriteFilesystemRawdataUtils = new FilesystemRawdataUtils(storageFolder);
+        return new FilesystemRawdataClient(localTempFolder, avroMaxSeconds, avroMaxBytes, avroSyncInterval, minListingIntervalSeconds, readOnlyFilesystemRawdataUtils, readWriteFilesystemRawdataUtils, storageFolder);
     }
-
-    final ConcurrentMap<String, Storage> storageByAccessType = new ConcurrentHashMap<>();
 }

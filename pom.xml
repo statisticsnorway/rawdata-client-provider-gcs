@@ -4,7 +4,7 @@
 
     <groupId>no.ssb.rawdata</groupId>
     <artifactId>rawdata-client-provider-gcs</artifactId>
-    <version>0.10-SNAPSHOT</version>
+    <version>0.12-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <name>GCS Rawdata Provider</name>
@@ -53,7 +53,7 @@
         <dependency>
             <groupId>no.ssb.rawdata</groupId>
             <artifactId>rawdata-client-api</artifactId>
-            <version>0.23</version>
+            <version>0.25</version>
         </dependency>
         <dependency>
             <groupId>no.ssb.spi</groupId>
@@ -74,7 +74,7 @@
         <dependency>
             <groupId>com.google.cloud</groupId>
             <artifactId>google-cloud-storage</artifactId>
-            <version>1.98.0</version>
+            <version>1.113.11</version>
             <exclusions>
                 <exclusion>
                     <!-- findbugs jsr305 conflicts with javax.annotation in a JPMS split-package issue -->
@@ -178,12 +178,12 @@
                     <plugin>
                         <groupId>org.sonarsource.scanner.maven</groupId>
                         <artifactId>sonar-maven-plugin</artifactId>
-                        <version>3.6.1.1688</version>
+                        <version>3.7.0.1746</version>
                     </plugin>
                     <plugin>
                         <groupId>org.jacoco</groupId>
                         <artifactId>jacoco-maven-plugin</artifactId>
-                        <version>0.8.4</version>
+                        <version>0.8.6</version>
                         <executions>
                             <execution>
                                 <id>prepare-agent</id>
