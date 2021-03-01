@@ -26,7 +26,6 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -61,8 +60,6 @@ class AvroRawdataProducer implements RawdataProducer {
     final long avroMaxBytes;
     final int avroSyncInterval;
     final String topic;
-
-    final Map<String, RawdataMessage.Builder> buffer = new ConcurrentHashMap<>();
 
     final AtomicReference<DataFileWriter<GenericRecord>> dataFileWriterRef = new AtomicReference<>();
     final Path topicFolder;
@@ -122,7 +119,6 @@ class AvroRawdataProducer implements RawdataProducer {
                     String fileSize = AvroRawdataUtils.humanReadableByteCount(upload.source.toFile().length(), false);
                     LOG.info("Copying Avro file {} ({}) to target: {}", upload.source.getFileName(), fileSize, upload.target);
                     upload.target.copyFrom(upload.source);
-                    ;
                     Files.delete(upload.source);
                     LOG.info("Copy COMPLETE! Deleted Avro file {}", upload.source.getFileName());
                 } catch (Throwable t) {
@@ -208,21 +204,7 @@ class AvroRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public RawdataMessage.Builder builder() throws RawdataClosedException {
-        return RawdataMessage.builder();
-    }
-
-    @Override
-    public RawdataProducer buffer(RawdataMessage.Builder builder) throws RawdataClosedException {
-        if (isClosed()) {
-            throw new RawdataClosedException();
-        }
-        buffer.put(builder.position(), builder);
-        return this;
-    }
-
-    @Override
-    public void publish(String... positions) throws RawdataClosedException, RawdataNotBufferedException {
+    public void publish(RawdataMessage... messages) throws RawdataClosedException, RawdataNotBufferedException {
         if (isClosed()) {
             throw new RawdataClosedException();
         }
@@ -234,7 +216,7 @@ class AvroRawdataProducer implements RawdataProducer {
             throw new RuntimeException(e);
         }
         try {
-            for (String position : positions) {
+            for (RawdataMessage message : messages) {
                 long now = System.currentTimeMillis();
                 timestampOfFirstMessageInWindow.compareAndSet(-1, now);
 
@@ -245,27 +227,22 @@ class AvroRawdataProducer implements RawdataProducer {
                     timestampOfFirstMessageInWindow.set(now);
                 }
 
-                RawdataMessage.Builder builder = buffer.remove(position);
-                if (builder == null) {
-                    throw new RawdataNotBufferedException(String.format("position %s has not been buffered", position));
+                ULID.Value ulidValue = message.ulid();
+                if (ulidValue == null) {
+                    ulidValue = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
                 }
-                if (builder.ulid() == null) {
-                    ULID.Value value = RawdataProducer.nextMonotonicUlid(ulid, prevUlid.get());
-                    builder.ulid(value);
-                }
-                RawdataMessage message = builder.build();
-                prevUlid.set(message.ulid());
+                prevUlid.set(ulidValue);
 
-                activeAvrofileMetadata.setIdOfFirstRecord(message.ulid());
-                activeAvrofileMetadata.setPositionOfFirstRecord(position);
+                activeAvrofileMetadata.setIdOfFirstRecord(ulidValue);
+                activeAvrofileMetadata.setPositionOfFirstRecord(message.position());
 
                 try {
                     GenericRecord record = new GenericData.Record(schema);
-                    record.put("id", new GenericData.Fixed(schema.getField("id").schema(), message.ulid().toBytes()));
+                    record.put("id", new GenericData.Fixed(schema.getField("id").schema(), ulidValue.toBytes()));
                     record.put("orderingGroup", message.orderingGroup());
                     record.put("sequenceNumber", message.sequenceNumber());
                     record.put("position", message.position());
-                    record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(e -> e.getKey(), e -> ByteBuffer.wrap(e.getValue()))));
+                    record.put("data", message.data().entrySet().stream().collect(Collectors.toMap(Map.Entry::getKey, e -> ByteBuffer.wrap(e.getValue()))));
 
                     if (avroBytesWrittenInBlock.get() >= avroSyncInterval) {
                         // start new block in avro file
@@ -302,11 +279,11 @@ class AvroRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public CompletableFuture<Void> publishAsync(String... positions) {
+    public CompletableFuture<Void> publishAsync(RawdataMessage... messages) {
         if (isClosed()) {
             throw new RawdataClosedException();
         }
-        return CompletableFuture.runAsync(() -> publish(positions));
+        return CompletableFuture.runAsync(() -> publish(messages));
     }
 
     @Override
@@ -319,7 +296,6 @@ class AvroRawdataProducer implements RawdataProducer {
         if (closed.compareAndSet(false, true)) {
             closeAvroFileAndTriggerAsyncUploadToGCS();
             uploadQueue.add(new Upload(null, null)); // send close signal to upload-thread.
-            buffer.clear();
         }
         try {
             // all callers must wait for all uploads to complete

@@ -196,15 +196,19 @@ class AvroRawdataConsumer implements RawdataConsumer {
     }
 
     @Override
-    public void close() throws Exception {
+    public void close() {
         if (closed.compareAndSet(false, true)) {
-            DataFileReader<GenericRecord> dataFileReader = activeBlobDataFileReaderRef.getAndSet(null);
-            if (dataFileReader != null) {
-                dataFileReader.close();
-            }
             activeBlobFromKeyRef.set(null);
             gcsTopicAvroFileCache.clear();
             preloadedMessages.clear();
+            DataFileReader<GenericRecord> dataFileReader = activeBlobDataFileReaderRef.getAndSet(null);
+            if (dataFileReader != null) {
+                try {
+                    dataFileReader.close();
+                } catch (IOException e) {
+                    throw new RuntimeException(e);
+                }
+            }
         }
     }
 }

@@ -53,13 +53,16 @@ public class ExampleApp {
 
     static void produceMessages(RawdataClient client) throws Exception {
         try (RawdataProducer producer = client.producer("my-rawdata-stream")) {
-            producer.publishBuilders(producer.builder().position("4BA210EC2")
-                    .put("the-payload", "Hello 1".getBytes(StandardCharsets.UTF_8)));
-            producer.publishBuilders(producer.builder().position("B827B4CCE")
+            producer.publish(RawdataMessage.builder().position("4BA210EC2")
+                    .put("the-payload", "Hello 1".getBytes(StandardCharsets.UTF_8))
+                    .build());
+            producer.publish(RawdataMessage.builder().position("B827B4CCE")
                     .put("the-payload", "Hello 2".getBytes(StandardCharsets.UTF_8))
-                    .put("metadata", ("created-time " + System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8)));
-            producer.publishBuilders(producer.builder().position("582AACB30")
-                    .put("the-payload", "Hello 3".getBytes(StandardCharsets.UTF_8)));
+                    .put("metadata", ("created-time " + System.currentTimeMillis()).getBytes(StandardCharsets.UTF_8))
+                    .build());
+            producer.publish(RawdataMessage.builder().position("582AACB30")
+                    .put("the-payload", "Hello 3".getBytes(StandardCharsets.UTF_8))
+                    .build());
         }
     }
 }

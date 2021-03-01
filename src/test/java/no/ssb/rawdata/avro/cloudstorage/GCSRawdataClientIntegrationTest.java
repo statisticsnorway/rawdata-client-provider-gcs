@@ -109,21 +109,17 @@ public class GCSRawdataClientIntegrationTest {
         long timestampBeforeD;
         long timestampAfterD;
         try (RawdataProducer producer = client.producer("the-topic")) {
-            producer.buffer(producer.builder().position("a").put("payload1", new byte[1000]).put("payload2", new byte[500]));
             timestampBeforeA = System.currentTimeMillis();
-            producer.publish("a");
+            producer.publish(RawdataMessage.builder().position("a").put("payload1", new byte[1000]).put("payload2", new byte[500]).build());
             Thread.sleep(5);
-            producer.buffer(producer.builder().position("b").put("payload1", new byte[400]).put("payload2", new byte[700]));
             timestampBeforeB = System.currentTimeMillis();
-            producer.publish("b");
+            producer.publish(RawdataMessage.builder().position("b").put("payload1", new byte[400]).put("payload2", new byte[700]).build());
             Thread.sleep(5);
-            producer.buffer(producer.builder().position("c").put("payload1", new byte[700]).put("payload2", new byte[70]));
             timestampBeforeC = System.currentTimeMillis();
-            producer.publish("c");
+            producer.publish(RawdataMessage.builder().position("c").put("payload1", new byte[700]).put("payload2", new byte[70]).build());
             Thread.sleep(5);
-            producer.buffer(producer.builder().position("d").put("payload1", new byte[8050]).put("payload2", new byte[130]));
             timestampBeforeD = System.currentTimeMillis();
-            producer.publish("d");
+            producer.publish(RawdataMessage.builder().position("d").put("payload1", new byte[8050]).put("payload2", new byte[130]).build());
             Thread.sleep(5);
             timestampAfterD = System.currentTimeMillis();
         }
