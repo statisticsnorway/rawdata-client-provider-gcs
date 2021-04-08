@@ -138,11 +138,11 @@ public class FilesystemAvroRawdataClientTck {
 
     @Test
     public void thatSingleMessageCanBeProducedAndConsumerSynchronously() throws Exception {
-        try (RawdataProducer producer = client.producer("the-topic")) {
+        try (RawdataProducer producer = client.producer("a/b/c")) {
             producer.publish(RawdataMessage.builder().position("a").put("payload1", new byte[5]).put("payload2", new byte[5]).build());
         }
 
-        try (RawdataConsumer consumer = client.consumer("the-topic")) {
+        try (RawdataConsumer consumer = client.consumer("a/b/c")) {
             RawdataMessage message = consumer.receive(1, TimeUnit.SECONDS);
             assertEquals(message.position(), "a");
             assertEquals(message.keys().size(), 2);
