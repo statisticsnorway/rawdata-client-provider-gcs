@@ -3,7 +3,6 @@ package no.ssb.rawdata.avro;
 import de.huxhorn.sulky.ulid.ULID;
 import no.ssb.rawdata.api.RawdataClosedException;
 import no.ssb.rawdata.api.RawdataMessage;
-import no.ssb.rawdata.api.RawdataNotBufferedException;
 import no.ssb.rawdata.api.RawdataProducer;
 import org.apache.avro.Schema;
 import org.apache.avro.SchemaBuilder;
@@ -204,7 +203,7 @@ class AvroRawdataProducer implements RawdataProducer {
     }
 
     @Override
-    public void publish(RawdataMessage... messages) throws RawdataClosedException, RawdataNotBufferedException {
+    public void publish(RawdataMessage... messages) throws RawdataClosedException {
         if (isClosed()) {
             throw new RawdataClosedException();
         }
