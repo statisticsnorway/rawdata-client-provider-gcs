@@ -47,12 +47,12 @@ public class GCSRawdataClientInitializer implements RawdataClientInitializer {
         long avroMaxBytes = Long.parseLong(configuration.get("avro-file.max.bytes"));
         int avroSyncInterval = Integer.parseInt(configuration.get("avro-file.sync.interval"));
         int gcsFileListingMaxIntervalSeconds = Integer.parseInt(configuration.get("gcs.listing.min-interval-seconds"));
-        Path serviceAccountKeyPath = Path.of(configuration.get("gcs.service-account.key-file"));
         String credentialProvider = configuration.getOrDefault("gcs.credential-provider", "service-account");
 
         GoogleCredentials credentials;
         if ("service-account".equalsIgnoreCase(credentialProvider)) {
             try {
+                Path serviceAccountKeyPath = Path.of(configuration.get("gcs.service-account.key-file"));
                 credentials = ServiceAccountCredentials.fromStream(Files.newInputStream(serviceAccountKeyPath, StandardOpenOption.READ));
             } catch (IOException e) {
                 throw new RuntimeException(e);
