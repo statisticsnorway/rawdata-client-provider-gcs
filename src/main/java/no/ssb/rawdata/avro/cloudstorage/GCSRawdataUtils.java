@@ -25,7 +25,7 @@ class GCSRawdataUtils implements AvroRawdataUtils {
         this.bucket = bucket;
     }
 
-    static final Pattern topicAndFilenamePattern = Pattern.compile("(?<topic>[^/]+)/(?<filename>.+)");
+    static final Pattern topicAndFilenamePattern = Pattern.compile("(?<topic>.+)/(?<filename>[^/]+)");
 
     static Matcher topicMatcherOf(BlobId blobId) {
         Matcher topicAndFilenameMatcher = topicAndFilenamePattern.matcher(blobId.getName());
