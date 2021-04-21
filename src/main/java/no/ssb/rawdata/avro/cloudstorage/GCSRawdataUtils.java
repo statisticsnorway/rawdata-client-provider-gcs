@@ -27,6 +27,8 @@ class GCSRawdataUtils implements AvroRawdataUtils {
 
     static final Pattern topicAndFilenamePattern = Pattern.compile("(?<topic>.+)/(?<filename>[^/]+)");
 
+    static final Pattern topicAndMetadataFilenamePattern = Pattern.compile("(?<topic>.+)/metadata/(?<filename>[^/]+)");
+
     static Matcher topicMatcherOf(BlobId blobId) {
         Matcher topicAndFilenameMatcher = topicAndFilenamePattern.matcher(blobId.getName());
         if (!topicAndFilenameMatcher.matches()) {
@@ -97,7 +99,8 @@ class GCSRawdataUtils implements AvroRawdataUtils {
     Stream<Blob> listTopicFiles(String bucketName, String topic) {
         Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic + "/"));
         Stream<Blob> stream = StreamSupport.stream(page.iterateAll().spliterator(), false);
-        return stream.filter(blob -> !blob.isDirectory() && blob.getSize() > 0);
+        return stream.filter(blob -> !blob.isDirectory() && blob.getSize() > 0)
+                .filter(blob -> !topicAndMetadataFilenamePattern.matcher(blob.getName()).matches());
     }
 
     @Override

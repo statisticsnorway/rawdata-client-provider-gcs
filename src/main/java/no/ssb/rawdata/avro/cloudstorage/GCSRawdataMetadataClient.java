@@ -37,7 +37,7 @@ public class GCSRawdataMetadataClient implements RawdataMetadataClient {
 
     @Override
     public Set<String> keys() {
-        Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic + "/"));
+        Page<Blob> page = storage.list(bucketName, Storage.BlobListOption.prefix(topic + "/metadata/"));
         return StreamSupport.stream(page.iterateAll().spliterator(), false)
                 .filter(blob -> !blob.isDirectory())
                 .map(BlobInfo::getName)

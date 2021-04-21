@@ -103,6 +103,27 @@ public class GCSRawdataClientIntegrationTest {
     public void thatMostFunctionsWorkWhenIntegratedWithGCS() throws Exception {
         assertNull(client.lastMessage("the-topic"));
 
+        {
+            RawdataMetadataClient metadata = client.metadata("the-topic");
+            assertEquals(metadata.topic(), "the-topic");
+            assertEquals(metadata.keys().size(), 0);
+            String key1 = "//./key-1'§!#$%&/()=?";
+            String key2 = ".";
+            String key3 = "..";
+            metadata.put(key1, "Value-1".getBytes(StandardCharsets.UTF_8));
+            metadata.put(key2, "Value-2".getBytes(StandardCharsets.UTF_8));
+            metadata.put(key3, "Value-3".getBytes(StandardCharsets.UTF_8));
+            assertEquals(metadata.keys().size(), 3);
+            assertEquals(new String(metadata.get(key1), StandardCharsets.UTF_8), "Value-1");
+            assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Value-2");
+            assertEquals(new String(metadata.get(key3), StandardCharsets.UTF_8), "Value-3");
+            metadata.put(key2, "Overwritten-Value-2".getBytes(StandardCharsets.UTF_8));
+            assertEquals(metadata.keys().size(), 3);
+            assertEquals(new String(metadata.get(key2), StandardCharsets.UTF_8), "Overwritten-Value-2");
+            metadata.remove(key3);
+            assertEquals(metadata.keys().size(), 2);
+        }
+
         long timestampBeforeA;
         long timestampBeforeB;
         long timestampBeforeC;
@@ -146,6 +167,14 @@ public class GCSRawdataClientIntegrationTest {
             assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "c");
             consumer.seek(timestampBeforeA);
             assertEquals(consumer.receive(100, TimeUnit.MILLISECONDS).position(), "a");
+        }
+
+        {
+            RawdataMetadataClient metadata = client.metadata("the-topic");
+            assertEquals(metadata.keys().size(), 2);
+            String key = "uh9458goqkadl";
+            metadata.put(key, "Value-blah-blah".getBytes(StandardCharsets.UTF_8));
+            assertEquals(metadata.keys().size(), 3);
         }
     }
 
